@@ -45,6 +45,11 @@ module tsp_utilities
     module procedure equals_dbl
   end interface
 
+  interface uppercase
+    module procedure uppercase_sub
+    module procedure uppercase_fn
+  end interface
+
 contains
 
 !     Last change:  JD   28 Dec 2000    9:08 pm
@@ -2427,7 +2432,7 @@ function stddev(rData)   result(rStdDev)
 
 end function stddev
 
-subroutine uppercase ( s )
+subroutine uppercase_sub ( s )
 
   ! ARGUMENTS
   character (len=*), intent(inout) :: s
@@ -2443,7 +2448,28 @@ subroutine uppercase ( s )
   end do
 
   return
-end subroutine uppercase
+end subroutine uppercase_sub
+
+function uppercase_fn ( s )                               result(sOut)
+
+  ! ARGUMENTS
+  character (len=*), intent(in) :: s
+  character(len=len(s)) :: sOut
+  ! LOCALS
+  integer (kind=T_INT) :: i    ! do loop index
+  ! CONSTANTS
+  integer (kind=T_INT) :: LOWER_TO_UPPER = ichar( "A" ) - ichar( "a" )
+
+  sOut = s
+
+  do i=1,len_trim(sOut)
+      if ( ichar(sOut(i:i) ) >= ichar("a") .and. ichar(sOut) <= ichar("z") ) then
+          sOut(i:i) = char( ichar( sOut(i:i) ) + LOWER_TO_UPPER )
+      end if
+  end do
+
+  return
+end function uppercase_fn
 
 !> Convert an integer value into a formatted character string
 function int2char(iValue)  result(sBuf)
