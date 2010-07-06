@@ -1,5 +1,9 @@
 module tsp_command_processors
 
+  use tsp_data_structures
+  use tsp_utilities
+  implicit none
+
 contains
 
 !     Last change:  JD   22 Sep 2001    9:36 pm
@@ -7,11 +11,6 @@ subroutine get_new_series_name(ifail,aname)
 
 ! -- Subroutine get_new_series_name retreives a new series name from a block in
 !    the TSPROC input file.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)         :: ifail
        character(*), intent(out)    :: aname
@@ -111,11 +110,6 @@ subroutine get_file_name(ifail,afile)
 ! -- Subroutine READFILE retreives a file name from a data block on
 !    the TSPROC input file.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)         :: ifail
        character(*), intent(out)    :: afile
        integer ierr
@@ -145,11 +139,6 @@ end subroutine get_file_name
 subroutine get_date(ifail,dd1,mm1,yy1,alabel)
 
 ! -- Subroutine get_date reads a date from a block of the TSPROC input file.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)         :: ifail
        integer, intent(inout)       :: dd1,mm1,yy1
@@ -184,11 +173,6 @@ subroutine get_time(ifail,hh1,nn1,ss1,alabel)
 
 ! -- Subroutine get_time reads a time from a block of the TSPROC input file.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)          :: ifail
        integer, intent(inout)        :: hh1,nn1,ss1
        character*(*), intent(in)     :: alabel
@@ -222,11 +206,6 @@ subroutine get_context(ifail,icontext,acontext)
 
 ! -- Subroutine get_context reads a Context_g string from a block of the
 !    TSPROC input file.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(inout)          :: icontext
@@ -278,11 +257,6 @@ subroutine get_series_name(ifail,iseries,aword)
 ! -- Subroutine get_series_name reads a series name from a block of the
 !    TSPROC input file. It is assumed that the series name represents an already
 !    active time series.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(inout)          :: iseries
@@ -351,11 +325,6 @@ subroutine get_table_name(ifail,itable,jtype)
 ! -- Subroutine get_table_name reads a table name from a block of the
 !    TSPROC input file. It is assumed that the table name represents an already
 !    active table.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(inout)          :: itable
@@ -508,19 +477,11 @@ subroutine get_table_name(ifail,itable,jtype)
 end subroutine get_table_name
 
 
-
-
-
 subroutine date_check(ifail,yy1,mm1,dd1,hh1,nn1,ss1,yy2,mm2,dd2,hh2,nn2,ss2,  &
        begdays,begsecs,enddays,endsecs)
 
 ! -- Subroutine DATE_CHECK checks the integrity of date and time information
 !    supplied through a TSPROC data block.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(inout)          :: yy1,mm1,dd1,hh1,nn1,ss1,  &
@@ -607,11 +568,6 @@ subroutine test_context(ifail,icontext,acontext)
 ! -- Subroutine TEST_CONTEXT checks whether the context is such that processing
 !    should continue.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)            :: ifail
        integer, intent(in)             :: icontext
        character*(*), intent(in)       :: acontext(icontext)
@@ -654,11 +610,6 @@ subroutine alloc_tempseries(ifail,iterm)
 
 ! -- Subroutine ALLOC_TEMPSERIES allocates (or re-allocates) memory for the temporary
 !    time series.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(in)             :: iterm
@@ -708,11 +659,6 @@ subroutine get_yes_no(ifail,iyesno)
 
 ! -- Subroutine GET_YES_NO reads "yes" or "no" from a TSPROC input file.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)            :: ifail
        integer, intent(inout)          :: iyesno
 
@@ -750,11 +696,6 @@ subroutine beg_end_check(ifail,iseries,begdays,begsecs,enddays,endsecs)
 
 ! -- Subroutine BEG_END_CHECK checks that DATE_1, DATE_2, TIME_1 and TIME_2
 !    are compatible with a given time series.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(in)             :: iseries,begdays,begsecs,enddays,endsecs
@@ -800,12 +741,6 @@ subroutine numterms(iterm,ibterm,ieterm,begdays,begsecs,enddays,endsecs,iseries)
 ! if no DATE_1, DATE_2 values are supplied by the user, the default
 ! begdays = -99999998, and enddays = 100000000
 !
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(in)             :: iseries,begdays,begsecs,enddays,endsecs
        integer, intent(out)            :: iterm,ibterm,ieterm
 
@@ -864,10 +799,6 @@ rnear,rconst,valinterp,extrap,direction,startindex)
 !                  (note: 'med' is the default)
 !       startindex: index of bore index at which to start the search through the
 !                   table
-
-
-
-   use tsp_utilities
 
 	integer, intent(out)                    :: ifail
 	integer, intent(in)                     :: nbore
@@ -1111,14 +1042,9 @@ end subroutine time_interp_s
 
 
 
-subroutine read_new_table_name(ifail,itype,aname)
+subroutine get_new_table_name(ifail,itype,aname)
 
 ! -- Subroutine READ_NEW_TABLE_NAME reads the name of a new table.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(in)             :: itype
@@ -1243,18 +1169,13 @@ subroutine read_new_table_name(ifail,itype,aname)
 9800   ifail=1
        return
 
-end subroutine read_new_table_name
+end subroutine get_new_table_name
 
 
 
 subroutine get_time_units(ifail,itunit,itype)
 
 ! -- Subroutine get_time_UNITS reads time units from a TSPROC input file.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)            :: ifail
        integer, intent(out)            :: itunit
@@ -1425,11 +1346,6 @@ subroutine get_keyword_value(ifail,itype,ival,rval,aword)
 
 ! -- Subroutine GET_KEYWORD_VALUE retreives a keyword value from a TSPROC input file.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)        :: ifail
        integer, intent(in)         :: itype
        integer, intent(inout)      :: ival
@@ -1475,11 +1391,6 @@ subroutine get_keyword_value_double(ifail,itype,ival,rval,aword)
 !    can be double precision. This is a little rough. I should have modified
 !    GET_KEYWORD_VALUE and put in an optional argumment. But it is quick.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)                :: ifail
        integer, intent(in)                 :: itype
        integer, intent(inout)              :: ival
@@ -1521,11 +1432,6 @@ end subroutine get_keyword_value_double
 
 
 subroutine get_equation(ifail,eqntext,atext)
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)        :: ifail
        character*(*), intent(out)  :: eqntext
@@ -1612,11 +1518,6 @@ end subroutine get_equation
 
 subroutine get_two_numbers(ifail,rnum1,rnum2,atext)
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)        :: ifail
        real, intent(out)           :: rnum1,rnum2
        character*(*), intent(in)   :: atext
@@ -1653,11 +1554,6 @@ end subroutine get_two_numbers
 
 subroutine check_weight_order(ifail,rmin,rmax)
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)        :: ifail
        real, intent(in)            :: rmin,rmax
        character*15 aline
@@ -1678,8 +1574,6 @@ end subroutine check_weight_order
 
 
 subroutine remchar(sString_g,ach)
-
-       implicit none
 
        character*(*), intent(inout) :: sString_g
        character*(*), intent(in)    :: ach
@@ -1709,11 +1603,6 @@ subroutine make_basename(ifail,iout,nsterm,aname,basename)
 
 ! -- Subroutine MAKE_BASENAME formulates the basename of observation names pertaining
 !    to a SERIES, V_TABLE or E_TABLE.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)               :: ifail
        integer, intent(in)                :: iout,nsterm
@@ -1754,11 +1643,6 @@ end subroutine make_basename
 subroutine find_end(ifail)
 
 ! -- Subroutine FIND_END locates the end of a block when it is out of context.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out)       :: ifail
        integer ierr
@@ -1808,11 +1692,6 @@ subroutine nextwdmunit(ifail,nunit,afile)
 ! -- Function nextunit determines whether a new WDM file needs to be opened
 !    or whether an already open one can be used.
 
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out)           :: ifail
        integer, intent(out)           :: nunit
        integer j
@@ -1851,11 +1730,6 @@ subroutine get_next_block(ifail,iblock)
 
 ! -- Subroutine get_next_block obtains the header to the next section of
 !    the TSPROC input file.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
 
        integer, intent(out) :: ifail,iblock
 
@@ -2053,12 +1927,6 @@ end subroutine get_next_block
 subroutine Process_Settings(ifail)
 
 ! -- Subroutine ProcessSettings reads a SETTINGS segment from a TSPROC input file.
-
-       use tsp_data_structures
-       use tsp_utilities
-
-       implicit none
-
        integer, intent(out) :: ifail
 
        integer ierr

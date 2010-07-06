@@ -270,7 +270,7 @@ subroutine moving_window(ifail)
        integer icontext,iseries,ixcon,ierr,itemp,iterm,i,j,wt2,l,winterms,imode,  &
        icount,is,ie,iiterm,k
        real rtemp,first_value,last_value
-       character*10 aname,atemp
+       character (len=iTSNAMELENGTH) :: aname,atemp
        character*15 aline,amode
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -576,7 +576,7 @@ subroutine new_series_uniform(ifail)
        integer time_interval,time_unit,ival,tterm,iseries,dd,mm,yy,itemp
        real rtemp,rval
        double precision timediff,timeinc
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*30 atemp
@@ -964,7 +964,7 @@ subroutine series_difference(ifail)
        integer, intent(out)   :: ifail
 
        integer icontext,iseries,ixcon,ierr,iterm,i,j
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -1130,7 +1130,7 @@ subroutine series_base_level(ifail)
        integer icontext,iseries,ixcon,ierr,isub,jseries,bseries,ddb,mmb,yyb, &
        hhb,nnb,ssb,daysb,secsb,iterm,i,j,ineg
        real rbase
-       character*10 aname,atemp
+       character (len=iTSNAMELENGTH) :: aname,atemp
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -1424,7 +1424,7 @@ subroutine vol_to_series(ifail)
 
        integer ivtable,nsterm,idiff,ihalf,isecs,icontext,ixcon,ierr,iser, &
        j,idays
-       character*10 aname,abscissa
+       character (len=iTSNAMELENGTH) :: aname,abscissa
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -1648,7 +1648,7 @@ subroutine series_clean(ifail)
        integer icontext,iseries,ixcon,ierr,idelete,ilthresh,iuthresh,itemp,iterm,i,k,j, &
        isub
        real lthresh,uthresh,svalue,rtemp
-       character*10 aname,atemp
+       character (len=iTSNAMELENGTH) :: aname,atemp
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -1936,7 +1936,7 @@ subroutine bfilter(ifail)
        yk1,yk,yk_1
        real a(3),b(3),c(3),d(3),e(3),rval(-3:5),gval(-3:5)
        character*3 aaa
-       character*10 aname,filpass
+       character (len=iTSNAMELENGTH) :: aname,filpass
        character*20 aline,filtype
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -2680,7 +2680,7 @@ subroutine compare_series(ifail)
        j,isbterm,iobterm,iseterm,ioeterm,iiterm,ixcon,isterm,ioterm,k
        real rtemp,rtemp1,tsum1,tsum2,tsum3,tsum4
        character*3 aaa
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -2740,7 +2740,7 @@ subroutine compare_series(ifail)
            ixcon=1
          end if
          if(aoption.eq.'NEW_C_TABLE_NAME')then
-           call read_new_table_name(ierr,4,aname)
+           call get_new_table_name(ierr,4,aname)
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'DATE_1')then
            call get_date(ierr,dd1,mm1,yy1,'DATE_1')
@@ -3233,7 +3233,7 @@ subroutine reduce_span(ifail)
        integer dd1,mm1,yy1,hh1,nn1,ss1,dd2,mm2,yy2,hh2,nn2,ss2,ierr, &
        icontext,i,begdays,begsecs,enddays,endsecs,iterm,j,           &
        iseries,k,ibterm,ieterm,ixcon
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -3441,7 +3441,7 @@ subroutine statistics(ifail)
        iitemp,jj,minaverage,maxaverage,ii,nnterm,jrange
        real tpower,tsum,tmin,tmax,rtemp,raverage,localsum,tminmean,tmaxmean
        character*3 aaa
-       character*10 aname,atemp
+       character (len=iTSNAMELENGTH) :: aname,atemp
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -3513,7 +3513,7 @@ subroutine statistics(ifail)
            call get_time(ierr,hh2,nn2,ss2,'TIME_2')
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'NEW_S_TABLE_NAME')then
-           call read_new_table_name(ierr,1,aname)
+           call get_new_table_name(ierr,1,aname)
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'SERIES_NAME')then
            call get_series_name(ierr,iseries,'SERIES_NAME')
@@ -4007,7 +4007,7 @@ subroutine time_base(ifail)
        nsecsbtb,ndaysftb,nsecsftb,ntermos,ndaysbos,nsecsbos,ndaysfos,nsecsfos,istart, &
        intday,intsec,ixcon
        real valinterp
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -4225,7 +4225,7 @@ subroutine volume(ifail)
        integer ierr,icontext,iseries,itunit,iunit,jline,ndate,iv,nsterm,nsdays1, &
        nssecs1,nsdays2,nssecs2,dd,mm,yy,hh,nn,ss,ndays1,nsecs1,ndays2,nsecs2,itemp,ixcon
        real factor,fac,volcalc
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*120 datefile
@@ -4289,7 +4289,7 @@ subroutine volume(ifail)
            call get_context(ierr,icontext,acontext)
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'NEW_V_TABLE_NAME')then
-           call read_new_table_name(ierr,2,aname)
+           call get_new_table_name(ierr,2,aname)
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'FLOW_TIME_UNITS')then
            call get_time_units(ierr,itunit,1)
@@ -4548,7 +4548,7 @@ subroutine time_duration(ifail)
        integer ierr,icontext,iseries,itunit,iflow,id,i,ndays,nsecs,j,oldndays,oldnsecs, &
                nnterm,ixcon,iuo
        real rtemp,fac,duration,fflow,vval,oldvval,timediff,accumulation,timedelay
-       character*10 aname,atemp
+       character (len=iTSNAMELENGTH) :: aname,atemp
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)
@@ -4614,7 +4614,7 @@ subroutine time_duration(ifail)
            call get_context(ierr,icontext,acontext)
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'NEW_E_TABLE_NAME')then
-           call read_new_table_name(ierr,3,aname)
+           call get_new_table_name(ierr,3,aname)
            if(ierr.ne.0) go to 9800
          else if(aoption.eq.'EXCEEDENCE_TIME_UNITS')then
            call get_time_units(ierr,itunit,2)
@@ -4930,7 +4930,7 @@ subroutine displace(ifail)
        integer ierr,icontext,iseries,lag,itemp,nsterm,ilags,j,nsecs,ndays, &
        dd,mm,yy,hh,nn,ss,i,ixcon
        real fill,rtemp
-       character*10 aname
+       character (len=iTSNAMELENGTH) :: aname
        character*15 aline
        character*25 aoption
        character*25 acontext(MAXCONTEXT)

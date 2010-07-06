@@ -12,7 +12,9 @@ module tsp_data_structures
   integer, parameter    :: MAXTEMPDURFLOW=30
   integer, parameter    :: MAXTEMPFILE=200
   integer, parameter    :: MAXPAR=5000
+  integer, parameter    :: MAXBLOCKLENGTH = 50
   character, parameter  :: OBSCHAR='_'
+  integer, parameter    :: iTSNAMELENGTH = 18
 
   ! Define the sizes of base types used in the model
   integer*2, public, parameter :: T_LOGICAL = 4
@@ -34,146 +36,20 @@ module tsp_data_structures
   logical (kind=T_LOGICAL), public, parameter :: lFALSE = .false._T_LOGICAL
   real (kind=T_SGL), public, parameter :: rNODATA = -99999_T_SGL
 
-  type T_DIRECTIVE
-    integer (kind=T_INT)      :: iOpCode = 0
-    character(len=24)         :: sDirective = ""
-    integer (kind=T_INT)      :: iLevel = 0
-    logical (kind=T_LOGICAL)  :: lRequired = lTRUE
-    logical (kind=T_LOGICAL)  :: lDefined = lFALSE
-    character(len=64)         :: sArg = ""
-    integer (kind=T_INT)      :: iLineNumber = 0
-  end type T_DIRECTIVE
-
-  type T_BLOCK
-    character (len=48) :: sBlockName
-    type (T_DIRECTIVE), dimension(:), pointer :: pDirective
-  end type T_BLOCK
-
-  type T_FILEINFO
-    integer (kind=T_INT) :: iLogicalUnitNumber
-    character (len=256)  :: sFilename
-    integer (kind=T_INT) :: iLineNumber = 0
-  end type T_FILEINFO
 
   type T_MONTH
     character (len=3) :: sAbbreviation
     character (len=12) :: sName
   end type T_MONTH
 
-  type T_USGS_NWIS_DAILY
-    integer (kind=T_INT) :: iWaterYear
-    integer (kind=T_INT) :: iYear
-    integer (kind=T_INT) :: iMonth
-    integer (kind=T_INT) :: iDay
-    integer (kind=T_INT) :: iJulianDay
-    real (kind=T_SGL) :: rMeanDischarge
-    character (len=10) :: sDataFlag
-  end type T_USGS_NWIS_DAILY
-
-  type T_USGS_NWIS_GAGE
-    character (len=256) :: sAgencyCode
-    character (len=256) :: sSiteNumber
-    character (len=256) :: sDescription
-    type (T_USGS_NWIS_DAILY), dimension(:), pointer :: pGageData
-  end type T_USGS_NWIS_GAGE
-
-  type time_series
-    logical active
-    integer nterm
-    character*2 type
-    character*10 name
-    integer, dimension(:), pointer :: days
-    integer, dimension(:), pointer :: secs
-    real,    dimension(:), pointer :: val
-  end type time_series
-
-  ! general-purpose table for arbitrary stats output
-  type g_table
-    logical active
-    character*10 name
-    character*10 series_name
-    character (len=80), dimension(:), pointer    :: sDescription
-    real, dimension(:), pointer    :: rValue
-  end type g_table
-
-  ! STATISTICS TABLE
-  type s_table
-    logical active
-    character*10 name
-    character*10 series_name
-    real     maximum
-    real     minimum
-    real     range
-    real     mean
-    real     stddev
-    real     total
-    real     minmean
-    real     maxmean
-    real     rec_power
-    integer  rec_icount
-    integer  rec_itrans
-    integer  rec_begdays
-    integer  rec_begsecs
-    integer  rec_enddays
-    integer  rec_endsecs
-    integer  avetime
-  end type s_table
-
-  ! COMPARE SERIES table
-  type c_table
-    logical active
-    character*10 name
-    character*10 series_name_obs
-    character*10 series_name_sim
-    real     bias
-    real     se
-    real     rbias
-    real     rse
-    real     ns
-    real     ce
-    real     ia
-    integer  rec_icount
-    integer  rec_begdays
-    integer  rec_begsecs
-    integer  rec_enddays
-    integer  rec_endsecs
-  end type c_table
-
-  ! VOLUME table
-  type v_table
-    logical active
-    character*10 name
-    character*10 series_name
-    integer nterm
-    integer, dimension(:), pointer :: days1
-    integer, dimension(:), pointer :: secs1
-    integer, dimension(:), pointer :: days2
-    integer, dimension(:), pointer :: secs2
-    real, dimension(:), pointer    :: vol
-  end type v_table
-
-  !FLOW-DURATION table (exceedance table)
-  type d_table
-    logical active
-    character*10 name
-    character*10 series_name
-    character*7 time_units
-    integer under_over
-    integer nterm
-    real total_time
-    real, dimension(:), pointer     :: flow
-    real, dimension(:), pointer     :: tdelay
-    real, dimension(:), pointer     :: time
-  end type d_table
-
-  type (time_series) tempseries_g
-  type (time_series) series_g(MAXSERIES)
-  type (s_table) stable_g(MAXSTABLE)
-  type (g_table) gtable_g(MAXGTABLE)
-  type (c_table) ctable_g(MAXCTABLE)
-  type (v_table) vtable_g(MAXVTABLE)
-  type (d_table) tempdtable_g
-  type (d_table) dtable_g(MAXDTABLE)
+!  type (time_series) tempseries_g
+!  type (time_series) series_g(MAXSERIES)
+!  type (s_table) stable_g(MAXSTABLE)
+!  type (g_table) gtable_g(MAXGTABLE)
+!  type (c_table) ctable_g(MAXCTABLE)
+!  type (v_table) vtable_g(MAXVTABLE)
+!  type (d_table) tempdtable_g
+!  type (d_table) dtable_g(MAXDTABLE)
 
   integer LU_TSPROC_CONTROL,LU_OUT
   integer NumProcBloc_g,ILine_g,IProcSetting_g
@@ -313,8 +189,9 @@ module tsp_data_structures
 
    integer, parameter :: iGET_SETTINGS                 = 1
 
-! global parameter for rec file output unit
+! global parameter for rec file, std output unit
    integer, public :: LU_REC
+   integer, public :: LU_STD_OUT = 6
 
    type (T_MONTH),dimension(12) :: MONTH = (/ &
      T_MONTH('JAN', 'January'), &
@@ -330,5 +207,22 @@ module tsp_data_structures
      T_MONTH('NOV', 'November'), &
      T_MONTH('DEC', 'December') &
      /)
+
+  type T_USGS_NWIS_DAILY
+    integer (kind=T_INT) :: iWaterYear
+    integer (kind=T_INT) :: iYear
+    integer (kind=T_INT) :: iMonth
+    integer (kind=T_INT) :: iDay
+    integer (kind=T_INT) :: iJulianDay
+    real (kind=T_SGL) :: rMeanDischarge
+    character (len=10) :: sDataFlag
+  end type T_USGS_NWIS_DAILY
+
+  type T_USGS_NWIS_GAGE
+    character (len=256) :: sAgencyCode
+    character (len=256) :: sSiteNumber
+    character (len=256) :: sDescription
+    type (T_USGS_NWIS_DAILY), dimension(:), allocatable :: pGageData
+  end type T_USGS_NWIS_GAGE
 
 end module tsp_data_structures

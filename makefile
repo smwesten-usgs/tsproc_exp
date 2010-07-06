@@ -8,13 +8,14 @@ FFLAGS	= -O2 -cpp -fbounds-check
 F95		= gfortran
 #F95		= g95
 GCC     = gcc
+AR		= ar rcs
 
 #LIBPATH	= -L/cygdrive/c/usr/local/lib/gcc-lib/i686-pc-mingw/4.0.3
 LIB		= -lgfortran
 
 # -luser32 -lgdi32
 
-all:	main tsp_test
+all:	main tsp_test file_io lib
 
 main:	tsp_utilities.o tsp_data_structures.o tsp_equation_parser.o tsp_input.o \
 		tsp_output.o tsp_time_series_processors.o tsproc_main.o wsc_additions.o \
@@ -34,6 +35,19 @@ tsp_test:	tsp_utilities.o tsp_data_structures.o tsp_equation_parser.o tsp_input.
 		tsp_hydrologic_indices.o \
 		$(LIBPATH) $(LIB) $(FFLAGS)
 
+file_io:	tsp_utilities.o tsp_data_structures.o tsp_control_file_ops.o
+		$(F95) test_fileio.F90 -o tsp_fileio \
+		tsp_utilities.o tsp_data_structures.o tsp_control_file_ops.o \
+		$(LIBPATH) $(LIB) $(FFLAGS)
+
+lib:	tsp_utilities.o tsp_data_structures.o tsp_equation_parser.o tsp_input.o \
+		tsp_output.o tsp_time_series_processors.o wsc_additions.o \
+		tsp_command_processors.o tsp_hydrologic_indices.o tsp_control_file_ops.o
+		$(AR) libtsproc.a \
+		tsp_utilities.o tsp_data_structures.o tsp_equation_parser.o tsp_input.o \
+		tsp_output.o tsp_time_series_processors.o wsc_additions.o \
+		tsp_command_processors.o tsp_hydrologic_indices.o tsp_control_file_ops.o
+
 tsp_data_structures.o: tsp_data_structures.F90
 		$(F95) $(FFLAGS) -c tsp_data_structures.F90 -o tsp_data_structures.o
 
@@ -42,6 +56,9 @@ tsp_hydrologic_indices.o: tsp_hydrologic_indices.F90
 
 tsp_utilities.o: tsp_utilities.F90 tsp_data_structures.o
 		$(F95) $(FFLAGS) -c tsp_utilities.F90 -o tsp_utilities.o
+
+tsp_control_file_ops.o: tsp_control_file_ops.F90  tsp_data_structures.o tsp_utilities.o
+		$(F95) $(FFLAGS) -c tsp_control_file_ops.F90 -o tsp_control_file_ops.o
 
 tsp_time_series_processors.o: tsp_time_series_processors.F90  tsp_data_structures.o tsp_utilities.o
 		$(F95) $(FFLAGS) -c tsp_time_series_processors.F90 -o tsp_time_series_processors.o

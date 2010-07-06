@@ -52,8 +52,6 @@ module tsp_utilities
 
 contains
 
-!     Last change:  JD   28 Dec 2000    9:08 pm
-
 subroutine addquote(afile,aqfile)
 
 ! -- Subroutine ADDQUOTE adds quotes to a filename if it has a space in it.
@@ -78,14 +76,33 @@ subroutine addquote(afile,aqfile)
         return
 end subroutine addquote
 
+integer function nextunit()
+
+! -- Function nextunit determines the lowest unit number available for
+! -- opening.
+
+! -- Revision history:-
+!       June-November, 1995: version 1.
+
+   logical::lopen
+
+   do nextunit=20,100
+     inquire(unit=nextunit,opened=lopen)
+     if(.not.lopen) return
+   end do
+   write(6,10)
+10      format(' *** No more unit numbers to open files ***')
+   stop
+
+end function nextunit
 
 function str_compare(sString1, sString2)                   result(lBool)
 
-  character(len=*) :: sString1
-  character(len=*) :: sString2
+  character(len=*), intent(in) :: sString1
+  character(len=*), intent(in) :: sString2
   logical (kind=T_LOGICAL) :: lBool
 
-  if(trim(adjustl(uppercase(sString1))) .eq. trim(adjustl(uppercase(sString1)))) then
+  if(trim(adjustl(uppercase(sString1))) .eq. trim(adjustl(uppercase(sString2)))) then
     lBool = lTRUE
   else
     lBool = lFALSE
@@ -674,26 +691,6 @@ subroutine newdate(ndays,day1,mon1,year1,day2,mon2,year2)
    return
 
 end subroutine newdate
-
-integer function nextunit()
-
-! -- Function nextunit determines the lowest unit number available for
-! -- opening.
-
-! -- Revision history:-
-!       June-November, 1995: version 1.
-
-   logical::lopen
-
-   do nextunit=20,100
-     inquire(unit=nextunit,opened=lopen)
-     if(.not.lopen) return
-   end do
-   write(6,10)
-10      format(' *** No more unit numbers to open files ***')
-   stop
-
-end function nextunit
 
 !*****************************************************************************
 ! subroutines comprising the generic subroutine NUM2CHAR ------->
@@ -1834,6 +1831,11 @@ function julian_day ( iYear, iMonth, iDay, iOrigin ) result(iJD)
   j= iMonth
   k= iDay
 
+  call Assert(iMonth >= 1 .and. iMonth <= 12, "Illegal month value given", &
+     TRIM(__FILE__), __LINE__)
+  call Assert(iDay >= 1 .and. iDay <= 31, "Illegal day value given", &
+     TRIM(__FILE__), __LINE__)
+
   if(present(iOrigin)) then
     iOffset = iOrigin
   else
@@ -1933,6 +1935,51 @@ function num_days_in_year(iYear) result(iNumDaysInYear)
   return
 
 end function num_days_in_year
+
+!--------------------------------------------------------------------------
+
+subroutine parse_date(sString, iMonth, iDay, iYear, iJulianDay, sDateFormat)
+
+  character (len=*), intent(in) :: sString
+  integer (kind=T_INT), intent(out) :: iMonth
+  integer (kind=T_INT), intent(out) :: iDay
+  integer (kind=T_INT), intent(out) :: iYear
+  integer (kind=T_INT), intent(out) :: iJulianDay
+  character (len=*), intent(in), optional :: sDateFormat
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iStat
+  character (len=24) :: sDateFmt
+  character (len=24) :: sStr
+
+  if(present(sDateFormat)) then
+    sDateFmt = uppercase( trim(adjustl(sDateFormat)) )
+  else
+    sDateFmt = "MM/DD/YYYY"
+  endif
+
+  sStr = trim(adjustl(sString))
+
+  read(sStr(scan(string=sDateFmt,set="M") : &
+        scan(string=sDateFmt,set="M", back=lTRUE )),*, iostat = iStat) iMonth
+  call Assert(iStat==0, "Error parsing month value from text file", &
+    TRIM(__FILE__),__LINE__)
+
+  read(sStr(scan(string=sDateFmt,set="D") : &
+        scan(string=sDateFmt,set="D", back=lTRUE )),*, iostat = iStat) iDay
+  call Assert(iStat==0, "Error parsing day value from text file", &
+    TRIM(__FILE__),__LINE__)
+
+  read(sStr(scan(string=sDateFmt,set="Y") : &
+        scan(string=sDateFmt,set="Y", back=lTRUE )),*, iostat = iStat) iYear
+  call Assert(iStat==0, "Error parsing year value from text file", &
+    TRIM(__FILE__),__LINE__)
+
+  if(iYear <= 99 ) iYear = iYear + 1900    ! this might be a lethal assumption
+
+  iJulianDay = julian_day ( iYear, iMonth, iDay )
+
+end subroutine parse_date
 
 !!***
 
@@ -2040,9 +2087,11 @@ subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
   character (len=*), intent(in) :: sErrorMessage
   character (len=*), optional :: sFilename
   integer (kind=T_INT), optional :: iLineNo
+
   logical :: lFileOpen
 
   if ( .not. lCondition ) then
+
       print *,'FATAL ERROR - HALTING TSPROC'
       print *,trim(sErrorMessage)
       print *, " "
@@ -2066,6 +2115,41 @@ subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
 
   return
 end subroutine Assert
+
+!--------------------------------------------------------------------------
+
+subroutine Warn(lCondition,sWarningMessage,sFilename,iLineNo)
+
+  ! ARGUMENTS
+  logical (kind=T_LOGICAL), intent(in) :: lCondition
+  character (len=*), intent(in) :: sWarningMessage
+  character (len=*), optional :: sFilename
+  integer (kind=T_INT), optional :: iLineNo
+  logical :: lFileOpen
+
+  if ( .not. lCondition ) then
+      print *,' *** WARNING *** WARNING ***'
+      print *,trim(sWarningMessage)
+      print *, " "
+      if(present(sFilename)) print *,"filename: ", trim(sFilename)
+      if(present(iLineNo)) print *,"line no.: ",iLineNo
+
+      ! echo error condition to the log file ONLY if it is open!
+      inquire (unit=LU_REC, opened=lFileOpen)
+      if(lFileOpen) then
+
+        write(UNIT=LU_REC,FMT=*) ' *** WARNING *** WARNING ***'
+        write(UNIT=LU_REC,FMT=*) trim(sWarningMessage)
+        write(UNIT=LU_REC,FMT=*) " "
+        if(present(sFilename)) write(UNIT=LU_REC,FMT=*) "filename: ", &
+           trim(sFilename)
+        if(present(iLineNo)) write(UNIT=LU_REC,FMT=*) "line no.: ",iLineNo
+
+      end if
+  end if
+
+  return
+end subroutine Warn
 
 !--------------------------------------------------------------------------
 !!****s* types/Chomp_tab
@@ -2119,6 +2203,37 @@ subroutine Chomp_tab(sRecord, sItem)
   return
 end subroutine Chomp_tab
 
+
+subroutine Chomp(sRecord, sItem, sDelimiters)
+
+  ! ARGUMENTS
+  character (len=*), intent(inout)           :: sRecord
+  character (len=256), intent(out)           :: sItem
+  character (len=*), intent(in), optional    :: sDelimiters
+  ! LOCALS
+  integer (kind=T_INT) :: iR                      ! Index in sRecord
+
+  ! eliminate any leading spaces
+  sRecord = adjustl(sRecord)
+
+  if(present(sDelimiters)) then
+    iR = SCAN(sRecord,sDelimiters)
+  else
+    iR = SCAN(sRecord," ")
+  endif
+
+  if(iR==0) then
+    sItem = trim(sRecord)   ! no delimiters found; return entirety of sRecord
+    sRecord = ""            ! as sItem
+  else
+    sItem = trim(sRecord(1:iR-1))
+    sRecord = trim(adjustl(sRecord(iR+1:)))
+  end if
+
+  return
+end subroutine Chomp
+
+
 !!***
 
 !--------------------------------------------------------------------------
@@ -2144,36 +2259,35 @@ end subroutine Chomp_tab
 !
 ! SOURCE
 
-subroutine Chomp(sRecord, sItem)
+!subroutine Chomp(sRecord, sItem)
 
   ! ARGUMENTS
-  character (len=*), intent(inout) :: sRecord
-  character (len=256), intent(out) :: sItem
+!  character (len=*), intent(inout) :: sRecord
+!  character (len=256), intent(out) :: sItem
   ! LOCALS
-  integer (kind=T_INT) :: iR                      ! Index in sRecord
-  integer (kind=T_INT) :: iS                      ! Index in sItem
-  logical (kind=T_LOGICAL) :: lSkip               ! TRUE while skipping spaces
+!  integer (kind=T_INT) :: iR                      ! Index in sRecord
+!  integer (kind=T_INT) :: iS                      ! Index in sItem
+!  logical (kind=T_LOGICAL) :: lSkip               ! TRUE while skipping spaces
 
   ! Set my pointers and remove leading and trailing spaces
-  iR = 1
-  iS = 1
-  sItem = ""
-  lSkip = lTRUE
-  do iR=1,len_trim(sRecord)
-      if ( lSkip .and. sRecord(iR:iR) == " " ) then
-          cycle
-      else if ( .not. lSkip .and. sRecord(iR:iR) == " " ) then
-          exit
-      else
-          lSkip = lFALSE
-          sItem(iS:iS) = sRecord(iR:iR)
-          iS = iS+1
-      end if
-  end do
-  sRecord = sRecord(iR:)
-
-  return
-end subroutine Chomp
+!  iR = 1
+!  iS = 1
+!  sItem = ""
+!  lSkip = lTRUE
+!  do iR=1,len_trim(sRecord)
+!      if ( lSkip .and. sRecord(iR:iR) == " " ) then
+!          cycle
+!      else if ( .not. lSkip .and. sRecord(iR:iR) == " " ) then
+!          exit
+!      else
+!          lSkip = lFALSE
+!          sItem(iS:iS) = sRecord(iR:iR)
+!          iS = iS+1
+!      end if
+!  end do
+!  sRecord = sRecord(iR:)
+!
+!!end subroutine Chomp
 
 !!***
 
@@ -2483,6 +2597,51 @@ function int2char(iValue)  result(sBuf)
   return
 
 end function int2char
+
+
+subroutine openlog(sFilename)
+
+  character(len=*), intent(in), optional :: sFilename
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iStat
+  character(len=256) :: sDateStr, sDateStrPretty
+
+  if(present(sFilename)) then
+    open(unit=LU_REC, file=trim(sFilename),iostat=iStat)
+  else
+    call GetSysTimeDate(sDateStr,sDateStrPretty)
+    open(unit=LU_REC, file="tsproc_logfile_"//trim(sDateStr)//".txt",iostat=iStat)
+  end if
+
+  call Assert(iStat==0, "Problem opening TSPROC logfile", trim(__FILE__), __LINE__)
+
+end subroutine openlog
+
+subroutine writelog(sMessage, sFormat)
+
+  character(len=*), intent(in)             :: sMessage
+  character(len=*), intent(in), optional   :: sFormat
+
+  ! [ LOCALS ]
+  character (len=256) :: sFormatString = ""
+
+  if(present(sFormat)) then
+    sFormatString = '"('//trim(sFormat)//')"'
+  else
+    sFormatString = '"(a)"'
+  endif
+
+  write(unit=LU_STD_OUT, fmt=trim(sFormatString)) sMessage
+  write(unit=LU_REC, fmt=trim(sFormatString)) sMessage
+
+end subroutine writelog
+
+subroutine closelog()
+
+  close(unit=LU_REC)
+
+end subroutine closelog
 
 
 end module tsp_utilities
