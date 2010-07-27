@@ -39,16 +39,11 @@ module tsp_utilities
     module procedure double_key_read
   end interface
 
-  interface equals
-    module procedure equals_int
-    module procedure equals_real
-    module procedure equals_dbl
-  end interface
-
-  interface uppercase
-    module procedure uppercase_sub
-    module procedure uppercase_fn
-  end interface
+  interface isElement
+    module procedure isElement_vec_vec
+    module procedure isElement_scalar_vec
+    module procedure isElement_vec_scalar
+  end interface isElement
 
 contains
 
@@ -96,6 +91,8 @@ integer function nextunit()
 
 end function nextunit
 
+!------------------------------------------------------------------------------
+
 function str_compare(sString1, sString2)                   result(lBool)
 
   character(len=*), intent(in) :: sString1
@@ -109,6 +106,20 @@ function str_compare(sString1, sString2)                   result(lBool)
   end if
 
 end function str_compare
+
+elemental function str_compare_elem(sString1, sString2)              result(lBool)
+
+  character(len=*), intent(in) :: sString1
+  character(len=*), intent(in) :: sString2
+  logical (kind=T_LOGICAL) :: lBool
+
+  if(trim(adjustl(uppercase(sString1))) .eq. trim(adjustl(uppercase(sString2)))) then
+    lBool = lTRUE
+  else
+    lBool = lFALSE
+  end if
+
+end function str_compare_elem
 
 
 subroutine spacesub(sString_g)
@@ -1641,50 +1652,6 @@ end function pos_d_test
 ! -- It returns .TRUE. or .FALSE.
 
 
-logical function equals_int(r1,r2)
-
-        integer, intent(in)   :: r1
-        integer, intent(in)   :: r2
-
-        equals_int=(r1.eq.r2)
-
-end function equals_int
-
-
-
-logical function equals_real(r1,r2)
-
-          real, intent(in)      :: r1
-          real, intent(in)      :: r2
-
-          real                  :: rtemp
-
-          rtemp=abs(3.0*spacing(r1))
-          if(abs(r1-r2).lt.rtemp)then
-            equals_real=.true.
-          else
-            equals_real=.false.
-          end if
-
-end function equals_real
-
-
-logical function equals_dbl(r1,r2)
-
-          real (kind (1.0d0)), intent(in)      :: r1
-          real (kind (1.0d0)), intent(in)      :: r2
-
-          real (kind (1.0d0))                  :: rtemp
-
-          rtemp=abs(3.0*spacing(r1))
-          if(abs(r1-r2).lt.rtemp)then
-            equals_dbl=.true.
-          else
-            equals_dbl=.false.
-          end if
-
-end function equals_dbl
-
 !*****************************************************************************
 ! functions comprising the generic function KEY_READ
 !*****************************************************************************
@@ -1794,64 +1761,6 @@ function day_of_year(iJulianDay) result(iDOY)
 end function day_of_year
 
 !--------------------------------------------------------------------------
-!!****f* types/julian_day
-! NAME
-!   julian_day - Convert from a Gregorian calendar date to a Julian day number.
-!
-! SYNOPSIS
-!   Conversion from a Gregorian calendar date to a Julian day number.
-!   Valid for any Gregorian calendar date producing a Julian day
-!   greater than zero.
-!
-! INPUTS
-!   iYear   4-digit year
-!   iMonth  2-digit month (1-12)
-!   iDay    2-digit day (1-31)
-!
-! OUTPUTS
-!   iJD     integer number of days that have elapsed since noon
-!           Greenwich Mean Time (UT or TT) Monday, January 1, 4713 BC
-!
-! SOURCE
-
-function julian_day ( iYear, iMonth, iDay, iOrigin ) result(iJD)
-
-  ! [ ARGUMENTS ]
-  integer (kind=T_INT), intent(in) :: iYear, iMonth, iDay
-  integer (kind=T_INT), optional :: iOrigin
-
-  ! [ LOCALS ]
-  integer (kind=T_INT) i,j,k
-  integer (kind=T_INT) :: iOffset
-
-  ! [ RETURN VALUE ]
-  integer (kind=T_INT) :: iJD
-
-  i= iYear
-  j= iMonth
-  k= iDay
-
-  call Assert(iMonth >= 1 .and. iMonth <= 12, "Illegal month value given", &
-     TRIM(__FILE__), __LINE__)
-  call Assert(iDay >= 1 .and. iDay <= 31, "Illegal day value given", &
-     TRIM(__FILE__), __LINE__)
-
-  if(present(iOrigin)) then
-    iOffset = iOrigin
-  else
-    iOffset = 0
-  endif
-
-  iJD= ( k-32075_T_INT + 1461_T_INT * (i + 4800_T_INT + (j - 14_T_INT) / 12_T_INT) &
-        /4_T_INT + 367_T_INT * (j - 2_T_INT - (j - 14_T_INT)/ 12_T_INT * 12_T_INT) &
-        /12_T_INT - 3_T_INT *((i + 4900_T_INT + (j - 14_T_INT) &
-        /12_T_INT)/100_T_INT)/4_T_INT ) - iOffset
-
-  return
-
-end function julian_day
-
-!--------------------------------------------------------------------------
 !!****f* types/solstice
 ! NAME
 !   solstice - Returns 0 normally, or a value >0 during solstice or equinox.
@@ -1902,6 +1811,81 @@ function solstice (iJD)  result (iSol)
 
 end function solstice
 
+!--------------------------------------------------------------------------
+
+function isElement_vec_vec(sStringvec1, sStringvec2)     result(lResult)
+
+  character(len=*), dimension(:), intent(in) :: sStringVec1
+  character(len=*), dimension(:), intent(in) :: sStringVec2
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iCount1
+  integer (kind=T_INT) :: iCount2
+  integer (kind=T_INT) :: i, j
+  logical (kind=T_LOGICAL) :: lResult
+
+  iCount1 = size(sStringVec1)
+  iCount2 = size(sStringVec2)
+
+  lResult = lFALSE
+
+  do i=1,iCount1
+    do j=1,iCount2
+      if(str_compare(sStringVec1(i),sStringVec2(j))) then
+        lResult = lTRUE
+        exit
+      endif
+    enddo
+  enddo
+
+end function isElement_vec_vec
+
+function isElement_scalar_vec(sString1, sStringvec2)     result(lResult)
+
+  character(len=*), intent(in) :: sString1
+  character(len=*), dimension(:), intent(in) :: sStringVec2
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iCount2
+  integer (kind=T_INT) :: i, j
+  logical (kind=T_LOGICAL) :: lResult
+
+  iCount2 = size(sStringVec2)
+
+  lResult = lFALSE
+
+  do j=1,iCount2
+    if(str_compare(sString1,sStringVec2(j))) then
+      lResult = lTRUE
+      exit
+    endif
+  enddo
+
+end function isElement_scalar_vec
+
+function isElement_vec_scalar(sStringvec1, sString2)     result(lResult)
+
+  character(len=*), dimension(:), intent(in) :: sStringVec1
+  character(len=*), intent(in) :: sString2
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iCount1
+  integer (kind=T_INT) :: i, j
+  logical (kind=T_LOGICAL) :: lResult
+
+  iCount1 = size(sStringVec1)
+
+  lResult = lFALSE
+
+  do i=1,iCount1
+    if(str_compare(sStringVec1(i),sString2)) then
+      lResult = lTRUE
+      exit
+    endif
+  enddo
+
+end function isElement_vec_scalar
+
 !!***
 
 !--------------------------------------------------------------------------
@@ -1936,220 +1920,6 @@ function num_days_in_year(iYear) result(iNumDaysInYear)
 
 end function num_days_in_year
 
-!--------------------------------------------------------------------------
-
-subroutine parse_date(sString, iMonth, iDay, iYear, iJulianDay, sDateFormat)
-
-  character (len=*), intent(in) :: sString
-  integer (kind=T_INT), intent(out) :: iMonth
-  integer (kind=T_INT), intent(out) :: iDay
-  integer (kind=T_INT), intent(out) :: iYear
-  integer (kind=T_INT), intent(out) :: iJulianDay
-  character (len=*), intent(in), optional :: sDateFormat
-
-  ! [ LOCALS ]
-  integer (kind=T_INT) :: iStat
-  character (len=24) :: sDateFmt
-  character (len=24) :: sStr
-
-  if(present(sDateFormat)) then
-    sDateFmt = uppercase( trim(adjustl(sDateFormat)) )
-  else
-    sDateFmt = "MM/DD/YYYY"
-  endif
-
-  sStr = trim(adjustl(sString))
-
-  read(sStr(scan(string=sDateFmt,set="M") : &
-        scan(string=sDateFmt,set="M", back=lTRUE )),*, iostat = iStat) iMonth
-  call Assert(iStat==0, "Error parsing month value from text file", &
-    TRIM(__FILE__),__LINE__)
-
-  read(sStr(scan(string=sDateFmt,set="D") : &
-        scan(string=sDateFmt,set="D", back=lTRUE )),*, iostat = iStat) iDay
-  call Assert(iStat==0, "Error parsing day value from text file", &
-    TRIM(__FILE__),__LINE__)
-
-  read(sStr(scan(string=sDateFmt,set="Y") : &
-        scan(string=sDateFmt,set="Y", back=lTRUE )),*, iostat = iStat) iYear
-  call Assert(iStat==0, "Error parsing year value from text file", &
-    TRIM(__FILE__),__LINE__)
-
-  if(iYear <= 99 ) iYear = iYear + 1900    ! this might be a lethal assumption
-
-  iJulianDay = julian_day ( iYear, iMonth, iDay )
-
-end subroutine parse_date
-
-!!***
-
-!--------------------------------------------------------------------------
-!!****f* types/gregorian_date
-! NAME
-!   gregorian_date - Convert from a Julian day number to a Gregorian date.
-!
-! SYNOPSIS
-!   Conversion to a Gregorian calendar date from a Julian date.
-!   Valid for any Gregorian calendar date producing a Julian day number
-!   greater than zero.
-!
-! INPUTS
-!   iJD     integer number of days that have elapsed since noon
-!           Greenwich Mean Time (UT or TT) Monday, January 1, 4713 BC
-! OUTPUTS
-!   iYear   4-digit year
-!   iMonth  2-digit month (1-12)
-!   iDay    2-digit day (1-31)
-!
-! NOTES
-!   Reference: Fliegel, H. F. and van Flandern, T. C. (1968).
-!   Communications of the ACM, Vol. 11, No. 10 (October, 1968).
-!   Modified from code found at:
-!       http://aa.usno.navy.mil/faq/docs/JD_Formula.html
-!
-! SOURCE
-
-subroutine gregorian_date(iJD, iYear, iMonth, iDay, iOrigin)
-
-!! COMPUTES THE GREGORIAN CALENDAR DATE (YEAR,MONTH,DAY)
-!! GIVEN THE JULIAN DATE (JD).
-
-  ! [ ARGUMENTS ]
-  integer (kind=T_INT) :: iJD
-  integer (kind=T_INT), intent(inout) :: iYear, iMonth, iDay
-  integer (kind=T_INT), optional :: iOrigin
-  ! [ LOCALS ]
-  integer (kind=T_INT) iI,iJ,iK,iL,iN
-  integer (kind=T_INT) :: iOffset
-
-  if(present(iOrigin)) then
-    iOffset = iOrigin
-  else
-    iOffset = 0
-  endif
-
-  ! allow for an alternate "origin" to be specified... technically,
-  ! this is no longer a "Julian" day, but alas... This modification
-  ! was required in order to process the "time" variables from global
-  ! climate models, which seem to be defined as something like this:
-  ! time:units = "days since 1960-01-01 00:00:00"
-  !
-  ! for the above example, JD = 2436935 on the first day; the NetCDF "time"
-  ! variable will be equal to 0.  Thus, in order to get the conversion
-  ! right, we must add 0 + 2436935 to yield a true Julian Day.
-
-  iJD = iJD + iOffset
-
-  iL= iJD + 68569_T_INT
-  iN= 4*iL / 146097_T_INT
-  iL= iL - (146097_T_INT * iN + 3_T_INT)/4_T_INT
-  iI= 4000_T_INT * (iL + 1_T_INT) / 1461001_T_INT
-  iL= iL - 1461_T_INT * iI / 4_T_INT + 31_T_INT
-  iJ= 80_T_INT * iL / 2447_T_INT
-  iK= iL - 2447_T_INT * iJ / 80_T_INT
-  iL= iJ / 11_T_INT
-  iJ= iJ + 2_T_INT - 12_T_INT * iL
-  iI= 100_T_INT * (iN - 49_T_INT) + iI + iL
-
-  iYear = iI
-  iMonth = iJ
-  iDay = iK
-
-  return
-
-end subroutine gregorian_date
-
-!--------------------------------------------------------------------------
-!!****s* types/Assert
-! NAME
-!   Assert - General-purpose error-checking routine.
-!
-! SYNOPSIS
-!   General-purpose error-checking routine. If lCondition is .false.,
-!   prints the error message and stops!
-!
-! INPUTS
-!   lCondition - statement that evaluates to a logical .true. or .false value.
-!   sErrorMessage - accompanying error message to print if lCondition is .false.
-!   sFilename - name of the offending file; populate with the C compiler
-!                 preprocessor macro __FILE__
-!   sLineNo - line number of error; populate with preprocessor macro __LINE__
-!
-! OUTPUTS
-!   NONE
-!
-! SOURCE
-
-subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
-
-  ! ARGUMENTS
-  logical (kind=T_LOGICAL), intent(in) :: lCondition
-  character (len=*), intent(in) :: sErrorMessage
-  character (len=*), optional :: sFilename
-  integer (kind=T_INT), optional :: iLineNo
-
-  logical :: lFileOpen
-
-  if ( .not. lCondition ) then
-
-      print *,'FATAL ERROR - HALTING TSPROC'
-      print *,trim(sErrorMessage)
-      print *, " "
-      if(present(sFilename)) print *,"module: ", trim(sFilename)
-      if(present(iLineNo)) print *,"line no.: ",iLineNo
-
-      ! echo error condition to the log file ONLY if it is open!
-      inquire (unit=LU_REC, opened=lFileOpen)
-      if(lFileOpen) then
-
-        write(UNIT=LU_REC,FMT=*) 'FATAL ERROR - HALTING TSPROC'
-        write(UNIT=LU_REC,FMT=*) trim(sErrorMessage)
-        write(UNIT=LU_REC,FMT=*) " "
-        if(present(sFilename)) write(UNIT=LU_REC,FMT=*) "module: ", &
-           trim(sFilename)
-        if(present(iLineNo)) write(UNIT=LU_REC,FMT=*) "line no.: ",iLineNo
-
-      end if
-      stop
-  end if
-
-  return
-end subroutine Assert
-
-!--------------------------------------------------------------------------
-
-subroutine Warn(lCondition,sWarningMessage,sFilename,iLineNo)
-
-  ! ARGUMENTS
-  logical (kind=T_LOGICAL), intent(in) :: lCondition
-  character (len=*), intent(in) :: sWarningMessage
-  character (len=*), optional :: sFilename
-  integer (kind=T_INT), optional :: iLineNo
-  logical :: lFileOpen
-
-  if ( .not. lCondition ) then
-      print *,' *** WARNING *** WARNING ***'
-      print *,trim(sWarningMessage)
-      print *, " "
-      if(present(sFilename)) print *,"filename: ", trim(sFilename)
-      if(present(iLineNo)) print *,"line no.: ",iLineNo
-
-      ! echo error condition to the log file ONLY if it is open!
-      inquire (unit=LU_REC, opened=lFileOpen)
-      if(lFileOpen) then
-
-        write(UNIT=LU_REC,FMT=*) ' *** WARNING *** WARNING ***'
-        write(UNIT=LU_REC,FMT=*) trim(sWarningMessage)
-        write(UNIT=LU_REC,FMT=*) " "
-        if(present(sFilename)) write(UNIT=LU_REC,FMT=*) "filename: ", &
-           trim(sFilename)
-        if(present(iLineNo)) write(UNIT=LU_REC,FMT=*) "line no.: ",iLineNo
-
-      end if
-  end if
-
-  return
-end subroutine Warn
 
 !--------------------------------------------------------------------------
 !!****s* types/Chomp_tab
@@ -2180,9 +1950,8 @@ subroutine Chomp_tab(sRecord, sItem)
   character (len=256), intent(out) :: sItem
   ! LOCALS
   integer (kind=T_INT) :: iR                      ! Index in sRecord
-  character (len=1), parameter :: cTab = ACHAR(9) ! ASCII tab character
 
-  iR = SCAN(sRecord,cTab)
+  iR = SCAN(sRecord,cTAB)
 
   if(iR==0) then
     sItem = trim(sRecord)      ! no tab found; return entirety of sRecord
@@ -2204,35 +1973,7 @@ subroutine Chomp_tab(sRecord, sItem)
 end subroutine Chomp_tab
 
 
-subroutine Chomp(sRecord, sItem, sDelimiters)
-
-  ! ARGUMENTS
-  character (len=*), intent(inout)           :: sRecord
-  character (len=256), intent(out)           :: sItem
-  character (len=*), intent(in), optional    :: sDelimiters
-  ! LOCALS
-  integer (kind=T_INT) :: iR                      ! Index in sRecord
-
-  ! eliminate any leading spaces
-  sRecord = adjustl(sRecord)
-
-  if(present(sDelimiters)) then
-    iR = SCAN(sRecord,sDelimiters)
-  else
-    iR = SCAN(sRecord," ")
-  endif
-
-  if(iR==0) then
-    sItem = trim(sRecord)   ! no delimiters found; return entirety of sRecord
-    sRecord = ""            ! as sItem
-  else
-    sItem = trim(sRecord(1:iR-1))
-    sRecord = trim(adjustl(sRecord(iR+1:)))
-  end if
-
-  return
-end subroutine Chomp
-
+!------------------------------------------------------------------------------
 
 !!***
 
@@ -2291,42 +2032,6 @@ end subroutine Chomp
 
 !!***
 
-subroutine GetSysTimeDate(sDateStr,sDateStrPretty)
-
-  character(len=256), intent(out) :: sDateStr, sDateStrPretty
-
-  character (len=256) :: sRecord
-  character (len=256) :: sItem
-  character (len=256) :: sDay
-  character (len=256) :: sMon
-  character (len=256) :: sDD
-  character (len=8) :: sHH
-  character (len=8) :: sMM
-  character (len=8) :: sSS
-  character (len=256) :: sTime
-  character (len=256) :: sYear
-
-  sRecord = FDATE()
-
-  call chomp(sRecord,sDay)
-  call chomp(sRecord,sMon)
-  call chomp(sRecord,sDD)
-  call chomp(sRecord,sTime)
-  call chomp(sRecord,sYear)
-
-  sHH = sTime(1:2)
-  sMM = sTime(4:5)
-  sSS = sTime(7:8)
-
-  sDateStr = TRIM(sDD)//"_"//TRIM(sMon)//"_"//TRIM(sYear)//"__"//&
-    TRIM(sHH)//"_"//TRIM(sMM)
-  sDateStrPretty = &
-    TRIM(sDay)//" "//TRIM(sMon)//" "//TRIM(sDD)//" "//TRIM(sYear)//" " &
-     //TRIM(sHH)//":"//TRIM(sMM)
-
-  return
-
-end subroutine GetSysTimeDate
 
 !------------------------------------------------------------------------------------------------------------------------------------
 
@@ -2462,6 +2167,8 @@ function median(rData)   result(rMedian)
 
 End Function median
 
+!------------------------------------------------------------------------------
+
 function quantile( rQuantile, rData)  result(rValue)
 
   real (kind=T_SGL), intent(in) :: rQuantile
@@ -2501,6 +2208,8 @@ function quantile( rQuantile, rData)  result(rValue)
 
 end function quantile
 
+!------------------------------------------------------------------------------
+
 function mean(rData)   result(rMean)
 
   real (kind=T_SGL), dimension(:), intent(in) :: rData
@@ -2511,6 +2220,8 @@ function mean(rData)   result(rMean)
   return
 
 end function mean
+
+!------------------------------------------------------------------------------
 
 function variance(rData)   result(rVariance)
 
@@ -2531,6 +2242,8 @@ function variance(rData)   result(rVariance)
 
 end function variance
 
+!------------------------------------------------------------------------------
+
 function stddev(rData)   result(rStdDev)
 
   real (kind=T_SGL), dimension(:), intent(in) :: rData
@@ -2546,45 +2259,7 @@ function stddev(rData)   result(rStdDev)
 
 end function stddev
 
-subroutine uppercase_sub ( s )
-
-  ! ARGUMENTS
-  character (len=*), intent(inout) :: s
-  ! LOCALS
-  integer (kind=T_INT) :: i    ! do loop index
-  ! CONSTANTS
-  integer (kind=T_INT) :: LOWER_TO_UPPER = ichar( "A" ) - ichar( "a" )
-
-  do i=1,len_trim(s)
-      if ( ichar(s(i:i) ) >= ichar("a") .and. ichar(s) <= ichar("z") ) then
-          s(i:i) = char( ichar( s(i:i) ) + LOWER_TO_UPPER )
-      end if
-  end do
-
-  return
-end subroutine uppercase_sub
-
-function uppercase_fn ( s )                               result(sOut)
-
-  ! ARGUMENTS
-  character (len=*), intent(in) :: s
-  character(len=len(s)) :: sOut
-  ! LOCALS
-  integer (kind=T_INT) :: i    ! do loop index
-  ! CONSTANTS
-  integer (kind=T_INT) :: LOWER_TO_UPPER = ichar( "A" ) - ichar( "a" )
-
-  sOut = s
-
-  do i=1,len_trim(sOut)
-      if ( ichar(sOut(i:i) ) >= ichar("a") .and. ichar(sOut) <= ichar("z") ) then
-          sOut(i:i) = char( ichar( sOut(i:i) ) + LOWER_TO_UPPER )
-      end if
-  end do
-
-  return
-end function uppercase_fn
-
+!------------------------------------------------------------------------------
 !> Convert an integer value into a formatted character string
 function int2char(iValue)  result(sBuf)
 
@@ -2598,50 +2273,6 @@ function int2char(iValue)  result(sBuf)
 
 end function int2char
 
-
-subroutine openlog(sFilename)
-
-  character(len=*), intent(in), optional :: sFilename
-
-  ! [ LOCALS ]
-  integer (kind=T_INT) :: iStat
-  character(len=256) :: sDateStr, sDateStrPretty
-
-  if(present(sFilename)) then
-    open(unit=LU_REC, file=trim(sFilename),iostat=iStat)
-  else
-    call GetSysTimeDate(sDateStr,sDateStrPretty)
-    open(unit=LU_REC, file="tsproc_logfile_"//trim(sDateStr)//".txt",iostat=iStat)
-  end if
-
-  call Assert(iStat==0, "Problem opening TSPROC logfile", trim(__FILE__), __LINE__)
-
-end subroutine openlog
-
-subroutine writelog(sMessage, sFormat)
-
-  character(len=*), intent(in)             :: sMessage
-  character(len=*), intent(in), optional   :: sFormat
-
-  ! [ LOCALS ]
-  character (len=256) :: sFormatString = ""
-
-  if(present(sFormat)) then
-    sFormatString = '"('//trim(sFormat)//')"'
-  else
-    sFormatString = '"(a)"'
-  endif
-
-  write(unit=LU_STD_OUT, fmt=trim(sFormatString)) sMessage
-  write(unit=LU_REC, fmt=trim(sFormatString)) sMessage
-
-end subroutine writelog
-
-subroutine closelog()
-
-  close(unit=LU_REC)
-
-end subroutine closelog
 
 
 end module tsp_utilities

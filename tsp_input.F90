@@ -3175,4 +3175,4 @@ subroutine get_ufore_series(ifail)
 
 end subroutine get_ufore_series
 
-subroutine get_mul_series_ssf_new(pBlockend module tsp_input
+end module tsp_input
