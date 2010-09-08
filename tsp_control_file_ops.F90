@@ -2,9 +2,10 @@ module tsp_control_file_ops
 
   use tsp_data_structures
   use tsp_utilities
+  use tsp_datetime_class
   implicit none
 
-  integer (kind=T_INT), parameter :: MAXARGLENGTH = 64
+  integer (kind=T_INT), parameter :: MAXARGLENGTH = 256
   integer, parameter    :: MAXBLOCKLENGTH = 1000
 
 
@@ -20,15 +21,17 @@ module tsp_control_file_ops
     integer (kind=T_INT), dimension(:), allocatable :: iLineNum
     logical (kind=T_LOGICAL), dimension(:), allocatable :: lSelect
 
-    contains
+  contains
 
     procedure, public :: printDict => print_dictionary_sub
     procedure, public :: deallocate => deallocate_block_sub
     procedure, public :: select => select_by_keyword_fn
-    procedure, public :: getVals => get_character_values_by_keyword_fn, &
-                            get_real_values_by_keyword_fn, &
-                            get_integer_values_by_keyword_fn
+    procedure, public :: index => find_by_keyword_fn
+    procedure, public :: getString => get_character_values_by_keyword_fn
+    procedure, public :: getReal => get_real_values_by_keyword_fn
+    procedure, public :: getInt => get_integer_values_by_keyword_fn
     procedure, public :: new => new_block_from_list_sub
+    procedure, public :: add => add_to_block_from_list_sub
 
   end type T_BLOCK
 
@@ -61,35 +64,36 @@ subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
   character (len=MAXARGLENGTH), dimension(:), pointer :: pTIME_1
   character (len=MAXARGLENGTH), dimension(:), pointer :: pDATE_2
   character (len=MAXARGLENGTH), dimension(:), pointer :: pTIME_2
-  logical (kind=T_LOGICAL) :: lBothMissing
-  logical (kind=T_LOGICAL) :: lBothPresent
 
-  pDATE_1 => pBlock%getVals("DATE_1")
-  pTIME_1 => pBlock%getVals("TIME_1")
-  pDATE_2 => pBlock%getVals("DATE_2")
-  pTIME_2 => pBlock%getVals("TIME_2")
+  character (len=MAXARGLENGTH) :: sDATE_1, sDATE_2, sTIME_1, sTIME_2
 
-  lBothMissing = str_compare(pDATE_1(1),"NA") .and. str_compare(pDATE_2(1),"NA")
-  lBothPresent =  ( .not. str_compare(pDATE_1(1),"NA")) &
-                     .and. (.not. str_compare(pDATE_2(1),"NA"))
+  ! set default values
+  sDATE_1 = "01/01/0001"; sTIME_1 = "00:00:00"
+  sDATE_2 = "12/31/3000"; sTIME_2 = "00:00:00"
 
-  call Assert( lBothPresent .or. lBothMissing, &
-    "You must supply either both DATE_1 and DATE_2 or no DATE values at all", &
-    trim(__FILE__), __LINE__)
+  ! obtain user-supplied values, if any
+  pDATE_1 => pBlock%getString("DATE_1")
+  pTIME_1 => pBlock%getString("TIME_1")
+  pDATE_2 => pBlock%getString("DATE_2")
+  pTIME_2 => pBlock%getString("TIME_2")
+
+  call warn(.not. (str_compare(pDATE_1(1),"NA") .and. str_compare(pDATE_2(1),"NA")), &
+    "No date argument was supplied in the "//trim(pBlock%sBlockname)//" block " &
+    //"(block starts at line "//trim(asChar(pBlock%iStartingLineNumber))//")")
 
   ! set default date values in the event that the user hasn't supplied TIME values
-  if(str_compare(pTIME_1(1),"NA") .and. str_compare(pTIME_2(1),"NA"))  then
-    call tDATETIME_1%calcJulianDay(iMonth=1, iDay=1, iYear=1, iHour=0, iMinute=0, iSecond=0)
-    call tDATETIME_2%calcJulianDay(iMonth=12, iDay=31, iYear=3000, iHour=0, iMinute=0, iSecond=0)
-  else
-    call tDATETIME_1%parseDate(pDATE_1(1))
-    call tDATETIME_1%parseTime(pTIME_1(1))
-    call tDATETIME_1%calcJulianDay()
+  if(.not. str_compare(pDATE_1(1),"NA"))  sDATE_1 = trim(pDATE_1(1))
+  if(.not. str_compare(pDATE_2(1),"NA"))  sDATE_2 = trim(pDATE_2(1))
+  if(.not. str_compare(pTIME_1(1),"NA"))  sTIME_1 = trim(pTIME_1(1))
+  if(.not. str_compare(pTIME_2(1),"NA"))  sTIME_2 = trim(pTIME_2(1))
 
-    call tDATETIME_2%parseDate(pDATE_2(1))
-    call tDATETIME_2%parseTime(pTIME_2(1))
-    call tDATETIME_2%calcJulianDay()
-  endif
+  call tDATETIME_1%parseDate(sDATE_1)
+  call tDATETIME_1%parseTime(sTIME_1)
+  call tDATETIME_1%calcJulianDay()
+
+  call tDATETIME_2%parseDate(sDATE_2)
+  call tDATETIME_2%parseTime(sTIME_2)
+  call tDATETIME_2%calcJulianDay()
 
   call Assert(tDATETIME_2 > tDATETIME_1, &
     "DATE_2 and TIME_2 must be greater than DATE_1 and TIME_1", trim(__FILE__),__LINE__)
@@ -108,7 +112,7 @@ subroutine open_file_sub(this, sFilename)
 
   this%sFilename = TRIM(sFilename)
 !  this%iLU = getNextLogicalUnit()
-  open(newunit=this%iLU, file=TRIM(sFilename), iostat=iStat)
+  open(newunit=this%iLU, file=TRIM(sFilename), status='OLD', iostat=iStat)
   call Assert(iStat == 0, &
       "Could not open file "//TRIM(sFilename), &
       TRIM(__FILE__),__LINE__)
@@ -127,13 +131,19 @@ subroutine close_file_sub(this)
       "Problem closing file "//TRIM(this%sFilename), &
       TRIM(__FILE__),__LINE__)
 
+  this%iLU = 0
+  this%sFilename = "none"
+  this%iLineNumber = 0
+  this%sActiveContext = "NA"
+  this%sDateFormat = "MM/DD/YYYY"
+
 end subroutine close_file_sub
 
 !------------------------------------------------------------------------------
 
-!> @brief This function returns a pointer to the next block within the TSPROC
-!> control file. Line numbers of the individual keywords are preserved
-!> within the \c iLineNum attribute of the block.
+!> @brief This function READS thenext TSPROC block and returns a pointer
+!> to the arguments contained in that block. Line numbers of the individual
+!> keywords are preserved within the \c iLineNum attribute of the block.
 !>
 !> @return  pBlock   Pointer to a block of TSPROC keywords and arguments
 !> @memberof T_BLOCK
@@ -189,19 +199,20 @@ function read_block_fn(this)      result(pBlock)
     elseif ( str_compare(sKey,"END" )) then
       lInBlock = lFALSE
       call Assert(str_compare(TRIM(sArg),pBlock%sBlockname), &
-        "Block names associated with START and END do not agree: block beginning at line number "// &
-          int2char(this%iLineNumber), trim(__FILE__),__LINE__)
+        "Block names associated with START and END do not agree: " &
+        //"block beginning at line number "// &
+          asChar(this%iLineNumber), trim(__FILE__),__LINE__)
       exit
     elseif ( lInBlock ) then
       i = i + 1
       sKeyword(i) = uppercase(TRIM(sKey))
-      sArg1(i) = uppercase(TRIM(sArg))
-      sArg2(i) = uppercase(TRIM(sLine))    ! return remainder of line as second arg
+      sArg1(i) = TRIM(sArg)
+      sArg2(i) = TRIM(sLine)    ! return remainder of line as second arg
       iLineNum(i) = this%iLineNumber
 
     else
       call Assert( lFALSE, &
-        "Problem with control file at line: "//int2char(this%iLineNumber), &
+        "Problem with control file at line: "//asChar(this%iLineNumber), &
         TRIM(__FILE__), __LINE__)
     endif
 
@@ -231,23 +242,25 @@ function read_block_fn(this)      result(pBlock)
 
       call Assert(iNumContext > 0 , &
          "Must have at least one context statement within "// &
-          trim(pBlock%sBlockname)//" block (line "//trim(int2char(this%iLineNumber))//")",&
+          trim(pBlock%sBlockname)//" block (line "//trim(asChar(this%iLineNumber))//")",&
           trim(__FILE__), __LINE__)
 
   elseif( str_compare(pBlock%sBlockname,"SETTINGS")) then
     lOKtoAllocate = lTRUE
   endif
 
-  call writelog("")
-  call writelog(repeat("-",80))
-  call writelog("")
+  call echolog("")
 
   if(lOKtoAllocate) then
-    call writelog('Processing '//TRIM(pBlock%sBlockName)//' block beginning at line number '// &
-        int2char(pBlock%iStartingLineNumber))
+    call echolog('Processing '//TRIM(pBlock%sBlockName)//' block beginning at line number '// &
+        asChar(pBlock%iStartingLineNumber),"(a)")
+    do j=1,i
+      call writelog('  <'//trim(asChar(iLineNum(j)))//'> '//trim(sKeyword(j)) &
+          //' '//trim(sArg1(j)) )
+    enddo
   else
-    call writelog('IGNORING '//TRIM(pBlock%sBlockName)//' block beginning at line number '// &
-        int2char(pBlock%iStartingLineNumber)//"; block inactive in context "//trim(this%sActiveContext))
+    call echolog('IGNORING '//TRIM(pBlock%sBlockName)//' block beginning at line number '// &
+        trim(asChar(pBlock%iStartingLineNumber))//"; block inactive in context "//trim(this%sActiveContext))
   endif
 
   ! allocate memory and return block data entries
@@ -276,11 +289,13 @@ subroutine print_dictionary_sub(this)
   ! [ LOCALS ]
   integer (kind=T_INT) :: i, n
 
+  write(LU_STD_OUT, fmt="(/,a,/)") "  ** CONTENTS of block "//quote(this%sBlockName)
+
   n = size(this%sKeyword)
 
   do i=1,n
-    write(LU_STD_OUT,fmt="(i3,t6,a20,2x,a18,2x,a18)") this%iLineNum(i), &
-             this%sKeyword(i),this%sArg1(i),this%sArg2(i)
+    write(LU_STD_OUT,fmt="(i3,t6,a,1x,a,1x,a)") this%iLineNum(i), &
+             trim(this%sKeyword(i)),trim(this%sArg1(i)),trim(this%sArg2(i))
   enddo
 
 end subroutine print_dictionary_sub
@@ -296,10 +311,11 @@ subroutine new_block_from_list_sub(this, sBlockname, sKeyword, sArg1)
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: iSize
+  integer (kind=T_INT) :: i
 
   iSize = size(sKeyword)
 
-  if(associated(this)) call this%deallocate()
+  call this%deallocate()
 
   allocate(this%sKeyword(iSize))
   allocate(this%sArg1(iSize))
@@ -309,9 +325,71 @@ subroutine new_block_from_list_sub(this, sBlockname, sKeyword, sArg1)
   this%sKeyword = sKeyword
   this%sArg1 = sArg1
   this%sArg2 = ""
-  this%iLineNum = -99999
+
+  do i=1,iSize
+    this%iLineNum(i) = i
+  enddo
+
+  this%iStartingLineNumber = 1
+  this%sBlockname = trim(sBlockname)
 
 end subroutine new_block_from_list_sub
+
+!------------------------------------------------------------------------------
+
+subroutine add_to_block_from_list_sub(this, sKeyword, sArg1)
+
+  class ( T_BLOCK ) :: this
+  character (len=MAXARGLENGTH), dimension(:), allocatable :: sKeyword
+  character (len=MAXARGLENGTH), dimension(:), allocatable :: sArg1
+  type (T_BLOCK) :: tTempBlock
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iSize, iCurrsize, iNewsize
+  integer (kind=T_INT) :: i
+
+  iCurrsize = size(this%sKeyword)
+  iSize = size(sKeyword)
+  iNewsize = iSize + iCurrSize
+
+  ! allocate space for temporary data structure
+  allocate(tTempBlock%sKeyword(iCurrSize))
+  allocate(tTempBlock%sArg1(iCurrSize))
+  allocate(tTempBlock%sArg2(iCurrSize))
+  allocate(tTempBlock%iLineNum(iCurrSize))
+  allocate(tTempBlock%lSelect(iCurrSize))
+
+  ! copy contents into temporary data structure
+  tTempBlock%sKeyword = this%sKeyword
+  tTempBlock%sArg1 = this%sArg1
+  tTempBlock%sArg2 = this%sArg2
+  tTempBlock%lSelect = this%lSelect
+
+  ! deallocate
+  call this%deallocate()
+
+  ! now allocate space for new (bigger) data structure
+  allocate(this%sKeyword(iSize + iCurrsize))
+  allocate(this%sArg1(iSize + iCurrsize))
+  allocate(this%sArg2(iSize + iCurrsize))
+  allocate(this%iLineNum(iSize + iCurrsize))
+  allocate(this%lSelect(iSize + iCurrsize))
+
+  this%sKeyword(1:iCurrsize) = tTempBlock%sKeyword
+  this%sArg1(1:iCurrsize) = tTempBlock%sArg1
+  this%sArg2(1:iCurrsize) = tTempBlock%sArg2
+  this%lSelect(1:iCurrsize) = tTempBlock%lSelect
+
+  this%sKeyword(iCurrsize+1:iNewsize) = sKeyword
+  this%sArg1(iCurrsize+1:iNewsize) = sArg1
+  this%sArg2(iCurrsize+1:iNewsize) = ""
+  this%lSelect(iCurrsize+1:iNewsize) = lFALSE
+
+  do i=1,(iNewSize)
+    this%iLineNum(i) = i
+  enddo
+
+end subroutine add_to_block_from_list_sub
 
 !------------------------------------------------------------------------------
 
@@ -342,7 +420,7 @@ function select_by_keyword_fn(this, sKeyword)    result(iCount)
   n = size(this%sKeyword)
 
   do i=1,n
-    if(str_compare(this%sKeyword(i),sKeyword)) then
+    if(str_compare(this%sKeyword(i)(1:len_trim(sKeyword)),sKeyword)) then
       this%lSelect(i) = lTRUE
     else
       this%lSelect(i)=lFALSE
@@ -353,6 +431,41 @@ function select_by_keyword_fn(this, sKeyword)    result(iCount)
   iCount = count(this%lSelect)
 
 end function select_by_keyword_fn
+
+!------------------------------------------------------------------------------
+
+function find_by_keyword_fn(this, sKeyword)    result(iIndex)
+
+  class ( T_BLOCK ) :: this
+  character (len=*) :: sKeyword
+  integer (kind=T_INT) :: iIndex
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: i, n, iCount
+
+  iCount = 0
+  iIndex = -99999
+
+  n = size(this%sKeyword)
+
+  do i=1,n
+    if(str_compare(this%sKeyword(i)(1:len_trim(sKeyword)),sKeyword))   then
+      iIndex = i
+      iCount = iCount + 1
+    endif
+  enddo
+
+  call Assert(iCount /= 0, "Keyword "//trim(sKeyword)//" was not found in block " &
+     //trim(this%sBlockname)//" starting at line "//trim(asChar(this%iStartingLineNumber)), &
+     trim(__FILE__), __LINE__)
+
+  call Assert(iCount <= 1, "Too many keywords ("//trim(sKeyword)//") found in block " &
+     //trim(this%sBlockname)//" starting at line "//trim(asChar(this%iStartingLineNumber)), &
+     trim(__FILE__), __LINE__)
+
+end function find_by_keyword_fn
+
+!------------------------------------------------------------------------------
 
 function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 
@@ -367,7 +480,7 @@ function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
   n = size(this%sKeyword)
 
   do i=1,n
-    if(str_compare(this%sKeyword(i),sKeyword)) then
+    if(str_compare(this%sKeyword(i)(1:len_trim(sKeyword)),sKeyword)) then
       this%lSelect(i) = lTRUE
     else
       this%lSelect(i)=lFALSE
@@ -379,7 +492,7 @@ function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 
 !  call Warn(iCount > 0,trim(sKeyword)// &
 !     " keyword was NOT found in the block starting at line number " &
-!     //trim(int2char(this%iStartingLineNumber))//": "//trim(this%sBlockname))
+!     //trim(asChar(this%iStartingLineNumber))//": "//trim(this%sBlockname))
 
   if(iCount == 0) then
     allocate(pArgs(1), stat=iStat)
@@ -387,7 +500,8 @@ function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
     pArgs = ""
     pArgs = "NA"
   else
-    allocate(pArgs(iCount))
+    allocate(pArgs(iCount), stat=iStat)
+    call Assert(iStat==0, "Problem with allocation",trim(__FILE__),__LINE__)
     pArgs = ""
     pArgs = transfer(pack(this%sArg1,this%lSelect),pArgs)
   endif
@@ -399,10 +513,10 @@ function get_integer_values_by_keyword_fn(this, sKeyword)    result(pArgs)
   class ( T_BLOCK ) :: this
   character (len=*) :: sKeyword
   integer (kind=T_INT), dimension(:), pointer :: pArgs
-!  character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: i, n, iCount
+  character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   n = size(this%sKeyword)
 
@@ -418,28 +532,34 @@ function get_integer_values_by_keyword_fn(this, sKeyword)    result(pArgs)
   iCount = count(this%lSelect)
 
   call Warn(iCount > 0,trim(sKeyword)// &
-     " keyword was NOT found in block starting as line number " &
-     //trim(int2char(this%iStartingLineNumber))//": "//trim(this%sBlockname))
+     " keyword was NOT found in block starting at line number " &
+     //trim(asChar(this%iStartingLineNumber))//": "//trim(this%sBlockname))
 
   if(iCount == 0) then
     allocate(pArgs(1))
     pArgs(1) = iNODATA
   else
     allocate(pArgs(iCount))
-    pArgs = transfer(pack(this%sArg1,this%lSelect),pArgs)
+    allocate(sArgs(iCount))
+    sArgs = pack(this%sArg1,this%lSelect)
+    do i=1,iCount
+      read(sArgs(i),fmt=*) pArgs(i)
+    enddo
   endif
 
 end function get_integer_values_by_keyword_fn
+
+!------------------------------------------------------------------------------
 
 function get_real_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 
   class ( T_BLOCK ) :: this
   character (len=*) :: sKeyword
   real (kind=T_SGL), dimension(:), pointer :: pArgs
-!  character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: i, n, iCount
+  character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   n = size(this%sKeyword)
 
@@ -455,15 +575,20 @@ function get_real_values_by_keyword_fn(this, sKeyword)    result(pArgs)
   iCount = count(this%lSelect)
 
   call Warn(iCount > 0,trim(sKeyword)// &
-     " keyword was NOT found in block starting as line number " &
-     //trim(int2char(this%iStartingLineNumber))//": "//trim(this%sBlockname))
+     " keyword was NOT found in block starting at line number " &
+     //trim(asChar(this%iStartingLineNumber))//": "//trim(this%sBlockname))
 
   if(iCount == 0) then
     allocate(pArgs(1))
-    pArgs(1) = rNODATA
+    pArgs(1) = -huge(pArgs)
   else
     allocate(pArgs(iCount))
-    pArgs = transfer(pack(this%sArg1,this%lSelect),pArgs)
+    allocate(sArgs(iCount))
+    sArgs = pack(this%sArg1,this%lSelect)
+    do i=1,iCount
+      read(sArgs(i),fmt=*) pArgs(i)
+    enddo
+
   endif
 
 end function get_real_values_by_keyword_fn
@@ -480,8 +605,8 @@ subroutine process_settings_block_sub(this, pBlock)
   character (len=MAXARGLENGTH), dimension(:), pointer :: pActiveContext
   character (len=MAXARGLENGTH), dimension(:), pointer :: pDateFormat
 
-  pActiveContext => pBlock%getVals("CONTEXT")
-  pDateFormat => pBlock%getVals("DATE_FORMAT")
+  pActiveContext => pBlock%getString("CONTEXT")
+  pDateFormat => pBlock%getString("DATE_FORMAT")
 
   call Assert(size(pActiveContext)==1, "Only one 'CONTEXT' keyword allowed in a SETTINGS block", &
     trim(__FILE__),__LINE__)

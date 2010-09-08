@@ -1,10 +1,10 @@
 module tsp_file_readers
-
   use tsp_data_structures
   use tsp_control_file_ops
   use tsp_time_series_manager
   use tsp_utilities
   use tsp_collections
+  use tsp_datetime_class
   implicit none
 
   type T_DATA_FILE
@@ -67,9 +67,9 @@ subroutine read_USGS_NWIS(pBlock, TS)
   call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
 
   ! get user supplied values for recognized keywords
-  pFILE => pBlock%getVals("FILE")
-  pNEW_SERIES_NAME => pBlock%getVals("NEW_SERIES_NAME")
-  pSITE => pBlock%getVals("SITE")
+  pFILE => pBlock%getString("FILE")
+  pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+  pSITE => pBlock%getString("SITE")
 
   open(newunit=LU_DATA,file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
   call Assert(iStat==0,'Error opening NWIS file '//TRIM(pFILE(1)))
@@ -158,7 +158,7 @@ subroutine read_USGS_NWIS(pBlock, TS)
   allocate(pGage(size(pSITE)),stat=iStat)
   call Assert(iStat==0,"Problem allocating memory for NWIS data structure", &
      TRIM(__FILE__),__LINE__)
-  call writelog("Allocated space for "//trim(int2char(size(pSITE)))//" sites")
+  call writelog("Allocated space for "//trim(asChar(size(pSITE)))//" sites")
 
   ! ALLOCATE memory for the time-series data associated with each site
   iNewIndex = 0
@@ -168,8 +168,8 @@ subroutine read_USGS_NWIS(pBlock, TS)
       allocate(pGage(iNewIndex)%pGageData(iTotalNumLines(iSiteNum)),stat=iStat)
       call Assert(iStat==0,"Problem allocating memory for NWIS data structure", &
         TRIM(__FILE__),__LINE__)
-      call writelog(" => Site "//trim(sSiteIDArray(iSiteNum))//" has "// &
-        trim(int2char(iTotalNumLines(iSiteNum)))//" data elements")
+      call echolog(" => Site "//trim(sSiteIDArray(iSiteNum))//" has "// &
+        trim(asChar(iTotalNumLines(iSiteNum)))//" data elements")
     endif
   end do
 
@@ -261,6 +261,8 @@ subroutine read_USGS_NWIS(pBlock, TS)
           pGage(i)%sDescription = trim(pDESCRIPTION(j))
       enddo
       call tTS(i)%new(pGage(i),sNewSeriesName)  ! a time series object
+      call echolog(" ==> Added series "//quote(tTS(i)%sSeriesname)//" from site " &
+         //trim(pSITE(i))//"; "//trim(asChar(size(tTS(i)%tData)))//" data elements")
       call TS%add(tTS(i))
     endif
 
@@ -324,10 +326,10 @@ subroutine get_mul_series_ssf(pBlock, TS)
   call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
 
   ! obtain user-entered values from TSPROC block
-  pFILE => pBlock%getVals("FILE")
-  pSITE => pBlock%getVals("SITE")
-  pNEW_SERIES_NAME => pBlock%getVals("NEW_SERIES_NAME")
-  pDATE_FORMAT => pBlock%getVals("DATE_FORMAT")
+  pFILE => pBlock%getString("FILE")
+  pSITE => pBlock%getString("SITE")
+  pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+  pDATE_FORMAT => pBlock%getString("DATE_FORMAT")
 
   if(str_compare(pDATE_FORMAT(1),"NA")) then
     sDateFormat = "MM/DD/YYYY"
@@ -339,7 +341,7 @@ subroutine get_mul_series_ssf(pBlock, TS)
   call Assert(iStat==0,'Error opening file or missing file: '//TRIM(pFILE(1)), &
     TRIM(__FILE__), __LINE__)
 
-  call writelog('Opened SSF file: '//TRIM(pFILE(1)))
+  call echolog('Opened SSF file: '//TRIM(pFILE(1)))
 
   ! make first pass through the SSF file to determine what it contains
   do
@@ -404,7 +406,7 @@ subroutine get_mul_series_ssf(pBlock, TS)
   allocate(pGage(size(pSITE)),stat=iStat)
   call Assert(iStat==0,"Problem allocating memory for SSF data structure", &
      TRIM(__FILE__),__LINE__)
-  call writelog("Allocated space for "//trim(int2char(size(pSITE)))//" sites")
+  call writelog("Allocated space for "//trim(asChar(size(pSITE)))//" sites")
 
   ! ALLOCATE memory for the time-series data associated with each site
   iNewIndex = 0
@@ -414,8 +416,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
       allocate(pGage(iNewIndex)%pGageData(iTotalNumLines(iSiteNum)),stat=iStat)
       call Assert(iStat==0,"Problem allocating memory for SSF data structure", &
         TRIM(__FILE__),__LINE__)
-      call writelog(" => Site number "//trim(sSiteIDArray(iSiteNum))//" has "// &
-        trim(int2char(iTotalNumLines(iSiteNum)))//" data elements")
+      call echolog("Site number "//trim(sSiteIDArray(iSiteNum))//" has "// &
+        trim(asChar(iTotalNumLines(iSiteNum)))//" data elements")
     endif
   end do
 
@@ -474,8 +476,6 @@ subroutine get_mul_series_ssf(pBlock, TS)
 
     ! we have valid data; record the date
     pGage(iSiteNum)%pGageData(iLineNum)%tDT = tCurrDate
-!     call pGage(iSiteNum)%pGageData(iLineNum)%tDT%parseDate(sDateTxt,"YY-MM-DD")
-!     call pGage(iSiteNum)%pGageData(iLineNum)%tDT%parseTime(sTimeTxt,"HH:MM:SS")
     call pGage(iSiteNum)%pGageData(iLineNum)%tDT%calcWaterYear()
 
   end do
@@ -488,6 +488,9 @@ subroutine get_mul_series_ssf(pBlock, TS)
     sNewSeriesName = pNEW_SERIES_NAME(i)
     if(size(pGage(i)%pGageData) > 0) then    ! if there are no records, no point in adding
       call tTS(i)%new(pGage(i),sNewSeriesName)    ! a time series object
+      call echolog(" ==> Added series "//quote(tTS(i)%sSeriesname)//" from site " &
+         //trim(pSITE(i))//"; "//trim(asChar(size(tTS(i)%tData)))//" data elements")
+
       call TS%add(tTS(i))
     endif
 
@@ -500,6 +503,11 @@ subroutine get_mul_series_ssf(pBlock, TS)
 
 
 end subroutine get_mul_series_ssf
+subroutine read_param_groups_file()
 
+end subroutine read_param_groups_file
+
+subroutine read_param_data_file()
+end subroutine read_param_data_file
 
 end module tsp_file_readers

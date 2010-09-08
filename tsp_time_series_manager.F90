@@ -2,12 +2,27 @@ module tsp_time_series_manager
 
   use tsp_data_structures
   use tsp_utilities
-
+  use tsp_statistics
+  use tsp_datetime_class
   implicit none
 
   integer (kind=T_INT), parameter :: iDAILY_DATA = 0
   integer (kind=T_INT), parameter :: iMONTHLY_DATA = 1
   integer (kind=T_INT), parameter :: iANNUAL_DATA = 2
+
+  type T_USGS_NWIS_DAILY
+    integer (kind=T_INT) :: iWaterYear
+    type (T_DATETIME) :: tDT
+    real (kind=T_SGL) :: rMeanDischarge
+    character (len=10) :: sDataFlag
+  end type T_USGS_NWIS_DAILY
+
+  type T_USGS_NWIS_GAGE
+    character (len=256) :: sAgencyCode
+    character (len=256) :: sSiteNumber
+    character (len=256) :: sDescription
+    type (T_USGS_NWIS_DAILY), dimension(:), allocatable :: pGageData
+  end type T_USGS_NWIS_GAGE
 
   type T_TIME_SERIES_DATA
     integer (kind=T_INT) :: iWaterYear     = 0
@@ -19,7 +34,6 @@ module tsp_time_series_manager
   contains
 !    procedure :: calcWaterYear => calc_water_year_sub
 !    procedure :: textToDate => text_to_date_sub
-!    procedure :: new => new_time_series_sub
 
   end type T_TIME_SERIES_DATA
 
@@ -31,21 +45,30 @@ module tsp_time_series_manager
     type (T_DATETIME) :: tStartDate
     type (T_DATETIME) :: tEndDate
     integer (kind=T_INT) :: iDataType = iDAILY_DATA
-    type (T_TIME_SERIES_DATA), dimension(:), allocatable :: pData
+    integer (kind=T_INT) :: iListOutputPosition = 0
+    type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
 
   contains
 
     procedure :: selectByDate => select_by_date_fn
-!    procedure :: selectByValue => select_by_value_sub
-    procedure :: selectReset => select_reset_sub
+    procedure :: selectByValue => select_by_value_fn
+
+    procedure :: reset => select_reset_sub
+    procedure :: list => list_output_sub
 
     procedure :: new_time_series_fm_txt_sub
     procedure :: new_time_series_fm_NWIS_sub
     procedure :: new_time_series_fm_values_sub
+    procedure :: new_time_series_fm_DT_sub
     generic :: new => new_time_series_fm_txt_sub, &
                                 new_time_series_fm_NWIS_sub, &
-                                new_time_series_fm_values_sub
+                                new_time_series_fm_values_sub, &
+                                new_time_series_fm_DT_sub
     procedure :: findDateMinAndMax => find_min_and_max_date_sub
+    procedure :: findDataGaps => find_data_gaps_fn
+    procedure :: integrate => integrate_fn
+
+!    procedure :: reducetimespan => reduce_time_span_sub
 
   end type T_TIME_SERIES
 
@@ -78,23 +101,23 @@ contains
 
     this%sSeriesName = TRIM(sSeriesName)
     call Warn(len_trim(sSeriesName) > MAXNAMELENGTH, &
-       "Series name exceeds "//int2char(MAXNAMELENGTH)//" characters and will be truncated")
+       "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
 
     this%sDescription = TRIM(sDescription)
 
-    if(allocated(this%pData)) deallocate(this%pData, stat=iStat)
+    if(allocated(this%tData)) deallocate(this%tData, stat=iStat)
     call Assert(iStat==0, "Unable to deallocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
-    allocate(this%pData(iCount), stat=iStat)
+    allocate(this%tData(iCount), stat=iStat)
     call Assert(iStat==0, "Unable to allocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
     do i=1,iCount
 
-       call this%pData(i)%tDT%parseDate(sDateTxt(i))
-       call this%pData(i)%tDT%parseTime(sTimeTxt(i))
-       read(sValTxt(i),*) this%pData(i)%rValue
+       call this%tData(i)%tDT%parseDate(sDateTxt(i))
+       call this%tData(i)%tDT%parseTime(sTimeTxt(i))
+       read(sValTxt(i),*) this%tData(i)%rValue
 
     enddo
 
@@ -130,29 +153,71 @@ contains
 
     this%sSeriesName = TRIM(sSeriesName)
     call Warn(len_trim(sSeriesName) <= MAXNAMELENGTH, &
-       "Series name exceeds "//int2char(MAXNAMELENGTH)//" characters and will be truncated")
+       "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
 
     this%sDescription = TRIM(sDescription)
 
-    if(allocated(this%pData)) deallocate(this%pData, stat=iStat)
+    if(allocated(this%tData)) deallocate(this%tData, stat=iStat)
     call Assert(iStat==0, "Unable to deallocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
-    allocate(this%pData(iCount), stat=iStat)
+    allocate(this%tData(iCount), stat=iStat)
     call Assert(iStat==0, "Unable to allocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
     do i=1,iCount
 
-       call this%pData(i)%tDT%calcJulianDay(iMonth(i), iDay(i), iYear(i), &
+       call this%tData(i)%tDT%calcJulianDay(iMonth(i), iDay(i), iYear(i), &
              iHour(i), iMinute(i), iSecond(i))
-       this%pData(i)%rValue = rValue(i)
+       this%tData(i)%rValue = rValue(i)
 
     enddo
 
     call this%findDateMinAndMax()
 
   end subroutine new_time_series_fm_values_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine new_time_series_fm_DT_sub(this, sSeriesName, sDescription, &
+    tDT, rValue)
+
+    class(T_TIME_SERIES) :: this
+    character(len=*), intent(in) :: sSeriesName
+    character(len=*), intent(in) :: sDescription
+    type (T_DATETIME), dimension(:) :: tDT
+    real (kind=T_SGL), dimension(:), intent(in) :: rValue
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iCount
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i
+    character(len=256) ::  sRecord, sItem
+
+    iCount = size(rValue)
+    call Assert(iCount == size(tDT), "Date and value vectors of unequal length", &
+        TRIM(__FILE__), __LINE__)
+
+    this%sSeriesName = TRIM(sSeriesName)
+
+    call Warn(len_trim(sSeriesName) <= MAXNAMELENGTH, &
+       "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
+
+    this%sDescription = TRIM(sDescription)
+
+    if(allocated(this%tData)) deallocate(this%tData, stat=iStat)
+    call Assert(iStat==0, "Unable to deallocate memory to create new time series", &
+       TRIM(__FILE__), __LINE__)
+
+    allocate(this%tData(iCount), stat=iStat)
+    call Assert(iStat==0, "Unable to allocate memory to create new time series", &
+       TRIM(__FILE__), __LINE__)
+    this%tData%tDT = tDT
+    this%tData%rValue = rValue
+
+    call this%findDateMinAndMax()
+
+  end subroutine new_time_series_fm_DT_sub
 
 !------------------------------------------------------------------------------
 
@@ -175,31 +240,119 @@ contains
     if(present(sNewSeriesName)) then
       this%sSeriesName = TRIM(sNewSeriesName)
       call Warn(len_trim(sNewSeriesName) <= MAXNAMELENGTH, &
-        "Series name exceeds "//int2char(MAXNAMELENGTH)//" characters and will be truncated")
+        "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
     else
       this%sSeriesName = TRIM(pGage%sSiteNumber)
       call Warn(len_trim(pGage%sSiteNumber) <= MAXNAMELENGTH, &
-        "Series name exceeds "//int2char(MAXNAMELENGTH)//" characters and will be truncated")
+        "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
     end if
 
     this%sDescription = TRIM(pGage%sDescription)
 
-    if(allocated(this%pData)) deallocate(this%pData, stat=iStat)
+    if(allocated(this%tData)) deallocate(this%tData, stat=iStat)
     call Assert(iStat==0, "Unable to deallocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
-    allocate(this%pData(iCount), stat=iStat)
+    allocate(this%tData(iCount), stat=iStat)
     call Assert(iStat==0, "Unable to allocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
-    this%pData%iWaterYear = pGage%pGageData%iWaterYear
-    this%pData%tDT = pGage%pGageData%tDT
-    this%pData%rValue = pGage%pGageData%rMeanDischarge
-    this%pData%sDataFlag = pGage%pGageData%sDataFlag
+    this%tData%iWaterYear = pGage%pGageData%iWaterYear
+    this%tData%tDT = pGage%pGageData%tDT
+    this%tData%rValue = pGage%pGageData%rMeanDischarge
+    this%tData%sDataFlag = pGage%pGageData%sDataFlag
 
     call this%findDateMinAndMax()
 
   end subroutine new_time_series_fm_NWIS_sub
+
+!------------------------------------------------------------------------------
+
+  function integrate_fn(this, GE, LE, rConversionFactor)   result(rVolume)
+
+    class(T_TIME_SERIES) :: this
+    type (T_DATETIME), intent(in), optional :: GE
+    type (T_DATETIME),intent(in),optional   :: LE
+    real (kind=T_SGL), intent(in), optional :: rConversionFactor
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: i
+   real (kind=T_DBL) :: rVolume
+   real (kind=T_SGL), dimension(:), allocatable :: rX1, rX2, rY1, rY2
+   type (T_DATETIME) :: tGE_DT
+   type (T_DATETIME) :: tLE_DT
+   logical (kind=T_LOGICAL) :: lKeep
+   integer (kind=T_INT) :: iSize, iCount
+   real (kind=T_DBL) :: rOffset
+   real (kind=T_SGL) :: rFactor
+   real (kind=T_DBL) :: rDelta
+
+   integer (kind=T_INT), parameter :: iAkimaResolution = 2
+
+   ! if no arguments supplied, all time series elements will be selected
+   if(present(GE)) then
+     tGE_DT = GE
+   else
+     tGE_DT = this%tStartDate
+   endif
+
+   if(present(LE)) then
+     tLE_DT = LE
+   else
+     tLE_DT = this%tEndDate
+   endif
+
+   ! if not supplied, factor of one is assumed
+   if(present(rConversionFactor)) then
+     rFactor = rConversionFactor
+   else
+     rFactor = 1_T_SGL
+   endif
+
+   rVolume = rD_ZERO
+
+   iCount = this%selectByDate(tGE_DT, tLE_DT)
+
+   call Assert(iCount > 2, "Not enough data to perform integration", &
+     trim(__FILE__), __LINE__)
+
+   ! we're subtracting this (large) value so that we can get away with using
+   ! single precision real values to represent the datetime values
+   rOffset = tGE_DT%getJulianDay()
+
+   allocate(rX1(iCount))
+   allocate(rY1(iCount))
+
+   allocate(rX2(iCount * iAkimaResolution ))
+   allocate(rY2(iCount * iAkimaResolution ))
+
+   rDelta = ( tLE_DT - tGE_DT ) / real(iCount, kind=T_SGL) &
+                                  / real(iAkimaResolution, kind=T_SGL)
+
+   rX1 = real( pack(this%tData%tDT%iJulianDay, this%tData%lSelect), kind=T_DBL) - rOffset &
+           + real(this%tData%tDT%rFractionOfDay, kind=T_DBL)
+
+   rY1 = pack(this%tData%rValue, this%tData%lSelect)
+
+   ! create synthetic X values to allow volume calculation to be made with higher-
+   ! resolution time series values as estimated with the Akima 1D method
+   do i=1, iCount * iAkimaResolution
+
+     rX2(i) = tGE_DT%getJulianDay() - rOffset + rDelta * real(i-1, kind=T_DBL)
+
+   enddo
+
+   call interp_1d( rX1, rY1, rX2, rY2)
+
+   do i=2, iCount * iAkimaResolution
+
+     rVolume = rVolume + ( (rX2(i) - rX2(i-1)) * ( (rY2(i) + rY2(i-1)) * rD_HALF) ) &
+                            * rFactor
+   enddo
+
+   deallocate(rX1, rY1, rX2, rY2)
+
+  end function integrate_fn
 
 !------------------------------------------------------------------------------
 
@@ -215,10 +368,10 @@ contains
     call tMINDATE%calcJulianDay( 1, 1, 3000, 0, 0, 0)
     call tMAXDATE%calcJulianDay( 1, 1, 1, 0, 0, 0)
 
-    do i=1,size(this%pData)
-      if(this%pData(i)%tDT < tMINDATE) tMINDATE = this%pData(i)%tDT
-      if(this%pData(i)%tDT > tMAXDATE) tMAXDATE = this%pData(i)%tDT
-!      print *, this%pData(i)%tDT%prettyDate(), " ",tMINDATE%prettyDate()," ", tMAXDATE%prettyDate()
+    do i=1,size(this%tData)
+      if(this%tData(i)%tDT < tMINDATE) tMINDATE = this%tData(i)%tDT
+      if(this%tData(i)%tDT > tMAXDATE) tMAXDATE = this%tData(i)%tDT
+!      print *, this%tData(i)%tDT%prettyDate(), " ",tMINDATE%prettyDate()," ", tMAXDATE%prettyDate()
     enddo
 
     this%tStartDate = tMINDATE
@@ -227,24 +380,91 @@ contains
   end subroutine find_min_and_max_date_sub
 
 !------------------------------------------------------------------------------
+
+  function find_data_gaps_fn(this)                      result(pDateRange)
+
+    class(T_TIME_SERIES) :: this
+
+!    ! [ LOCALS ]
+    type (T_DATERANGE), dimension(:), pointer :: pDateRange
+    type (T_DATETIME) :: tStartDate
+    integer (kind=T_INT) :: i
+    integer (kind=T_INT) :: iSize
+    integer (kind=T_INT) :: iDelta
+    integer (kind=T_INT) :: iNumGaps
+
+    iNumGaps = 0
+
+    iSize = size(this%tData)
+
+    write(LU_STD_OUT, fmt="(/,'Continuous date intervals found for time series ',a,':')") &
+         trim(this%sSeriesname)
+
+    do i=2,iSize
+      iDelta = this%tData(i)%tDT%iJulianDay - this%tData(i-1)%tDT%iJulianDay
+      if(iDelta /= 1) iNumGaps = iNumGaps + 1
+    enddo
+
+    if(iNumGaps > 0) then
+
+      allocate(pDateRange(iNumGaps + 1) )   ! we really care about the intervals, not the gaps!
+      iNumGaps = 0
+      tStartDate = this%tData(1)%tDT
+
+      do i=2,iSize
+
+        iDelta = this%tData(i)%tDT%iJulianDay - this%tData(i-1)%tDT%iJulianDay
+        if(iDelta /= 1) then
+          iNumGaps = iNumGaps + 1
+          call pDateRange(iNumGaps)%new(tStartDate, this%tData(i-1)%tDT)
+          tStartDate = this%tData(i+1)%tDT
+
+          write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") iNumGaps, &
+                  pDateRange(iNumGaps)%tStartDate%listdate(), &
+                  pDateRange(iNumGaps)%tEndDate%listdate()
+
+        endif
+
+      enddo
+
+      ! need to write out info on the *last* gapless interval
+      iNumGaps = iNumGaps + 1
+      call pDateRange(iNumGaps)%new(tStartDate, this%tData(iSize)%tDT)
+      write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") iNumGaps, &
+             pDateRange(iNumGaps)%tStartDate%listdate(), &
+             pDateRange(iNumGaps)%tEndDate%listdate()
+
+    else
+
+      allocate(pDateRange(1) )
+      call pDateRange(1)%new(this%tData(1)%tDT, this%tData(iSize)%tDT)
+      write(LU_STD_OUT,fmt="(/,'  ** NO GAPS **',/)")
+      write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") 1, &
+                pDateRange(1)%tStartDate%listdate(), &
+                pDateRange(1)%tEndDate%listdate()
+
+    endif
+
+  end function find_data_gaps_fn
+
 !------------------------------------------------------------------------------
 
   subroutine select_reset_sub(this)
 
     class(T_TIME_SERIES) :: this
 
-    this%pData%lSelect = lFALSE
+    this%tData%lSelect = lFALSE
 
   end subroutine select_reset_sub
 
 !------------------------------------------------------------------------------
 
-  function select_by_date_fn(this, tGE_Date, tLE_Date, lKeepCurrSelect)  result(iCount)
+  function select_by_date_fn(this, GE, LE, keep)  result(iCount)
 
     class(T_TIME_SERIES) :: this
-    type (T_DATETIME), intent(in), optional :: tGE_Date
-    type (T_DATETIME),intent(in),optional   :: tLE_Date
-    logical (kind=T_LOGICAL), intent(in), optional :: lKeepCurrSelect
+    type (T_DATETIME), intent(in), optional :: GE
+    type (T_DATETIME),intent(in),optional   :: LE
+    logical (kind=T_LOGICAL), intent(in), optional :: keep
     integer (kind=T_INT) :: iCount
 
     ! [ LOCALS ]
@@ -254,49 +474,143 @@ contains
     integer (kind=T_INT) :: i
 
     ! if no arguments supplied, all time series elements will be selected
-    if(present(tGE_Date)) then
-      tGE_DT = tGE_Date
+    if(present(GE)) then
+      tGE_DT = GE
     else
       tGE_DT = this%tStartDate
     endif
 
-    if(present(tLE_Date)) then
-      tLE_DT = tLE_Date
+    if(present(LE)) then
+      tLE_DT = LE
     else
       tLE_DT = this%tEndDate
     endif
 
     ! if this is TRUE, the select is only applied to elements that are
     ! already selected (as in a previous step)
-    if(present(lKeepCurrSelect)) then
-      lKeep = lKeepCurrSelect
+    if(present(keep)) then
+      lKeep = keep
     else
       lKeep = lFALSE
     endif
 
     if(lKeep) then
-      do i=1,size(this%pData)
-        if(this%pData(i)%lSelect &
-              .and. this%pData(i)%tDT >= tGE_DT &
-              .and. this%pData(i)%tDT <= tLE_DT) then
-          this%pData(i)%lSelect = lTRUE
+      do i=1,size(this%tData)
+        if(this%tData(i)%lSelect &
+              .and. this%tData(i)%tDT >= tGE_DT &
+              .and. this%tData(i)%tDT <= tLE_DT) then
+          this%tData(i)%lSelect = lTRUE
         endif
       enddo
     else
-      do i=1,size(this%pData)
-        if(this%pData(i)%tDT >= tGE_DT &
-              .and. this%pData(i)%tDT <= tLE_DT) then
-          this%pData(i)%lSelect = lTRUE
+      do i=1,size(this%tData)
+        if(this%tData(i)%tDT >= tGE_DT &
+              .and. this%tData(i)%tDT <= tLE_DT) then
+          this%tData(i)%lSelect = lTRUE
         else
-          this%pData(i)%lSelect = lFALSE
+          this%tData(i)%lSelect = lFALSE
         endif
       enddo
     endif
 
-    iCount = count(this%pData%lSelect)
+    iCount = count(this%tData%lSelect)
 
   end function select_by_date_fn
 
+!------------------------------------------------------------------------------
 
+  function select_by_value_fn(this, GE, LE, keep)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    real (kind=T_SGL), intent(in), optional :: GE
+    real (kind=T_SGL),intent(in),optional   :: LE
+    logical (kind=T_LOGICAL), intent(in), optional :: keep
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    real (kind=T_SGL) :: rGE_Val
+    real (kind=T_SGL) :: rLE_Val
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+
+    ! if no arguments supplied, all time series elements will be selected
+    if(present(GE)) then
+      rGE_Val = GE
+    else
+      rGE_Val = -huge(rGE_Val)
+    endif
+
+    if(present(LE)) then
+      rLE_Val = LE
+    else
+      rLE_Val = huge(rLE_Val)
+    endif
+
+    ! if this is TRUE, the select is only applied to elements that are
+    ! already selected (as in a previous step)
+    if(present(keep)) then
+      lKeep = keep
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+      do i=1,size(this%tData)
+        if(this%tData(i)%lSelect &
+              .and. this%tData(i)%rValue >= rGE_Val &
+              .and. this%tData(i)%rValue <= rLE_Val) then
+          this%tData(i)%lSelect = lTRUE
+        endif
+      enddo
+    else
+      do i=1,size(this%tData)
+        if(this%tData(i)%rValue >= rGE_Val &
+              .and. this%tData(i)%rValue <= rLE_Val) then
+          this%tData(i)%lSelect = lTRUE
+        else
+          this%tData(i)%lSelect = lFALSE
+        endif
+      enddo
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_value_fn
+
+!------------------------------------------------------------------------------
+
+  subroutine list_output_sub(this, sDateFormat, iLU)
+
+    class(T_TIME_SERIES) :: this
+    character(len=*), intent(in), optional :: sDateFormat
+    integer (kind=T_INT), intent(in), optional :: iLU
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: i
+    integer (kind=T_INT) :: LU
+    character(len=20) :: sDateFmt
+
+    if(present(iLU)) then
+      LU = iLU
+    else
+      LU = LU_STD_OUT
+    endif
+
+    if(present(sDateFormat)) then
+      sDateFmt = trim(sDateFormat)
+    else
+      sDateFmt = "MM/DD/YYYY"
+    endif
+
+    write(LU,fmt="(/,' TIME_SERIES ',a,' ---->')") quote(this%sSeriesName)
+
+    do i=1,size(this%tData)
+
+       write(LU,fmt="(1x,a,t20,a,3x,1pg14.7)") trim(this%sSeriesName), &
+          this%tData(i)%tDT%listdatetime(sDateFmt), this%tData(i)%rValue
+
+    enddo
+
+  end subroutine list_output_sub
 
 end module tsp_time_series_manager
