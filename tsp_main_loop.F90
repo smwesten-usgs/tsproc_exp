@@ -194,6 +194,28 @@ end subroutine listtablenames
 
 !------------------------------------------------------------------------------
 
+  subroutine pestwriteseriescomparison( sObservedSeries, sModeledSeries)
+
+    character(len=*), intent(in) :: sObservedSeries
+    character(len=*), intent(in) :: sModeledSeries
+
+    call TS%pestWriteTSComparison(sObservedSeries, sModeledSeries)
+
+  end subroutine pestwriteseriescomparison
+
+!------------------------------------------------------------------------------
+
+  subroutine pestwritetablecomparison( sObservedTable, sModeledTable)
+
+    character(len=*), intent(in) :: sObservedTable
+    character(len=*), intent(in) :: sModeledTable
+
+    call TS%pestWriteTableComparison(sObservedTable, sModeledTable)
+
+  end subroutine pestwritetablecomparison
+
+!------------------------------------------------------------------------------
+
   subroutine newtablecomparison( sObservedTable, sModeledTable, sEquationText)
 
     character(len=*), intent(in) :: sObservedTable
@@ -490,6 +512,46 @@ end subroutine listtablenames
     rReturnVals = quantiles( rQuantileVals, rDataVals)
 
   end subroutine testquantiles
+
+!------------------------------------------------------------------------------
+
+  subroutine hydrologic_indices(sSeriesname)
+
+    !f2py character*(*), intent(in), optional :: sSeriesName
+    character(len=*), intent(in), optional :: sSeriesName
+
+    ! [ LOCALS ]
+    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TABLE) :: tTable
+    integer (kind=T_INT) :: n
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+    character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
+
+      pTS =>TS%getTS(sSeriesName)
+
+      ! don't pass along the block object; use defaults
+      call tTable%calc_i_table(pTS)
+
+    elseif(str_compare(pBlock%sBlockName, "HYDROLOGIC_INDICES")) then
+
+      pArgs =>pBlock%getString("SERIES_NAME")
+      sTempSeriesname = pArgs(1)
+      pTS => TS%getTS( sTempSeriesname )
+      call tTable%calc_i_table(pTS, pBlock)
+
+    else
+
+      call Assert(lFALSE, "Unhandled case in routine hydrologic_indices", &
+        trim(__FILE__), __LINE__)
+
+    endif
+
+    call TS%add(tTable)
+    nullify(pTS)
+
+  end subroutine hydrologic_indices
 
 !------------------------------------------------------------------------------
 
@@ -981,6 +1043,10 @@ end subroutine usgs_hysep
 
       call series_equation()
 
+    elseif(str_compare(pBlock%sBlockname,"HYDROLOGIC_INDICES")) then
+
+      call hydrologic_indices()
+
     elseif(str_compare(pBlock%sBlockname,"EXCEEDENCE_TIME")) then
 
       call exceedence_time()
@@ -988,6 +1054,10 @@ end subroutine usgs_hysep
     elseif(str_compare(pBlock%sBlockname, "REDUCE_TIME_SPAN")) then
 
       call reduce_time_span()
+
+    elseif(str_compare(pBlock%sBlockname, "PERIOD_STATISTICS")) then
+
+      call period_statistics()
 
     elseif(str_compare(pBlock%sBlockname, "NEW_TIME_BASE")) then
 
@@ -1008,6 +1078,14 @@ end subroutine usgs_hysep
     elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_SSF")) then
 
       call get_mul_series_ssf(pBlock, TS)
+
+    elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_STATVAR")) then
+
+      call get_mul_series_statvar(pBlock, TS)
+
+    elseif(str_compare(pBlock%sBlockname,"GET_SERIES_WDM")) then
+
+      call get_series_WDM(pBlock, TS)
 
     elseif(str_compare(pBlock%sBlockname,"USGS_HYSEP")) then
 
@@ -1541,6 +1619,43 @@ subroutine newblock(sBlockname, sKeywords, sArgs)
   deallocate(sArg1, sKeyword)
 
 end subroutine newblock
+
+!------------------------------------------------------------------------------
+
+subroutine period_statistics()
+
+    ! [ LOCALS ]
+    type (T_TIME_SERIES), pointer :: pBaseTS
+    type (T_TIME_SERIES), pointer, dimension(:) :: pStatSeries
+    integer (kind=T_INT) :: i
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+    character (len=MAXARGLENGTH) :: sTempSeriesname
+
+
+
+    if(str_compare(pBlock%sBlockName, "PERIOD_STATISTICS")) then
+
+      pArgs =>pBlock%getString("SERIES_NAME")
+      sTempSeriesname = pArgs(1)
+      pBaseTS => TS%getTS( sTempSeriesname )
+      pStatSeries => pBaseTS%calcPeriodStatistics( pBlock)
+
+    else
+
+      call Assert(lFALSE, "Unhandled case in routine period_statistics", &
+        trim(__FILE__), __LINE__)
+
+    endif
+
+    do i=1,size(pStatSeries)
+
+      call TS%add(pStatSeries(i))
+
+    enddo
+
+    nullify(pBaseTS)
+
+end subroutine period_statistics
 
 !------------------------------------------------------------------------------
 

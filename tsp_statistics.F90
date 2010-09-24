@@ -40,6 +40,7 @@ module tsp_statistics
 
    type T_HI_STATS
       integer (kind=T_INT) :: iCount = 0
+      real (kind=T_SGL) :: rSum = rZERO
       real (kind=T_SGL) :: rMean = rZERO
       real (kind=T_SGL) :: rMedian = rZERO
       real (kind=T_SGL) :: rVariance = rZERO
@@ -49,6 +50,7 @@ module tsp_statistics
       real (kind=T_SGL), dimension(iNUM_QUANTILES) :: rExceedance = rZERO
       real (kind=T_SGL) :: rMin = rZERO
       real (kind=T_SGL) :: rMax = rZERO
+      real (kind=T_SGL) :: rRange = rZERO
       integer (kind=T_INT) :: iDayOfYearMin
       integer (kind=T_INT) :: iDayOfYearMax
       real (kind=T_SGL), dimension(iNUM_PERIODS) :: rPeriodMin = rZERO
@@ -82,8 +84,8 @@ module tsp_statistics
 function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
 
    real (kind=T_SGL), dimension(:) :: rData
-   integer (kind=T_INT), dimension(:) :: iMonth
-   integer (kind=T_INT), dimension(:) :: iYear
+   integer (kind=T_BYTE), dimension(:) :: iMonth
+   integer (kind=T_SHORT), dimension(:) :: iYear
    integer (kind=T_INT), dimension(:) :: iJulianDay
    type (T_STATS_COLLECTION), pointer :: pStats
 
@@ -111,6 +113,7 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
    call Assert( iStat == 0, &
      "Could not allocate memory for 'ByMonth' statistics data object")
 
+   ! calculate base statistics by month over all years
    do i=1,12
      allocate(rSubset(count(iMonth==i)))
      allocate(iJD(count(iMonth==i)))
@@ -119,7 +122,7 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
      rSubset = PACK(rData,iMonth==i)
      iJD = PACK(iJulianDay,iMonth==i)
 
-     if(size(rSubset) < 30) then
+     if(size(rSubset) < 26) then
        pStats%pByMonth(i)%lValid = lFALSE
      else
        pStats%pByMonth(i) = calc_base_stats(rSubset, iJD)
@@ -133,6 +136,7 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
    call Assert( iStat == 0, &
      "Could not allocate memory for 'ByYearAndMonth' statistics data object")
 
+   ! calculate annual statistics
    do i=iFirstYear,iLastYear
 
      allocate(rSubset(count( iYear==i )))
@@ -151,6 +155,7 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
      deallocate(rSubset)
      deallocate(iJD)
 
+     ! calculate monthly statistics for the current year
      do j=1,12
 
        allocate(rSubset(count(iMonth==j .and. iYear==i )))
@@ -160,7 +165,7 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
        rSubset = PACK(rData,iMonth==j .and. iYear==i)
        iJD = PACK(iJulianDay,iMonth==j .and. iYear==i)
 
-       if(size(rSubset) < 30) then
+       if(size(rSubset) < 26) then
          pStats%pByYearAndMonth(i,j)%lValid = lFALSE
        else
          pStats%pByYearAndMonth(i,j) = calc_base_stats(rSubset, iJD)
@@ -175,6 +180,7 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
    call Assert( iStat == 0, &
      "Could not allocate memory for 'AllRecords' statistics data object")
 
+   ! calculate base statistics for entire data period of record
    pStats%pAllRecords = calc_base_stats(rData, iJulianDay)
 
    return
@@ -203,6 +209,8 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
 
    pBaseStats%iCount = size(rData)
 
+   pBaseStats%rSum = sum(rData)
+
    pBaseStats%rMedian = median(rData)
 
    pBaseStats%rMean = mean(rData)
@@ -218,6 +226,7 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
 
    pBaseStats%rMin = MINVAL(rData)
    pBaseStats%rMax = MAXVAL(rData)
+   pBaseStats%rRange = pBaseStats%rMax - pBaseStats%rMin
    iLocMin = MINLOC(rData)
    iLocMax = MAXLOC(rData)
 

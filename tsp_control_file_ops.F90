@@ -6,7 +6,7 @@ module tsp_control_file_ops
   implicit none
 
   integer (kind=T_INT), parameter :: MAXARGLENGTH = 256
-  integer, parameter    :: MAXBLOCKLENGTH = 1000
+  integer, parameter    :: MAXBLOCKLENGTH = 10000
 
 
   !> @brief This defined type holds keyword and argument pairs for
@@ -40,7 +40,6 @@ module tsp_control_file_ops
     character (len=256)  :: sFilename
     integer (kind=T_INT) :: iLineNumber = 0
     character (len=MAXARGLENGTH) :: sActiveContext
-    character (len=DATETEXTLENGTH) :: sDateFormat = "MM/DD/YYYY"
 
   contains
 
@@ -54,28 +53,41 @@ module tsp_control_file_ops
 
 contains
 
-subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
+subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2, sDateFormat)
 
   type (T_BLOCK), pointer, intent(in) :: pBlock
   type (T_DATETIME), intent(out) :: tDATETIME_1, tDATETIME_2
+  character (len=*), optional :: sDateFormat
 
   ! [ LOCALS ]
   character (len=MAXARGLENGTH), dimension(:), pointer :: pDATE_1
   character (len=MAXARGLENGTH), dimension(:), pointer :: pTIME_1
   character (len=MAXARGLENGTH), dimension(:), pointer :: pDATE_2
   character (len=MAXARGLENGTH), dimension(:), pointer :: pTIME_2
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pDATE_FORMAT
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pTIME_FORMAT
 
   character (len=MAXARGLENGTH) :: sDATE_1, sDATE_2, sTIME_1, sTIME_2
+  character (len=MAXARGLENGTH) :: sDATE_FORMAT, sTIME_FORMAT
 
   ! set default values
-  sDATE_1 = "01/01/0001"; sTIME_1 = "00:00:00"
+  sDATE_1 = "01/01/0100"; sTIME_1 = "00:00:00"
   sDATE_2 = "12/31/3000"; sTIME_2 = "00:00:00"
+  sTIME_FORMAT = sDEFAULT_TIME_FORMAT
+
+  if(present(sDateFormat) ) then
+    sDATE_FORMAT = sDateFormat
+  else
+    sDATE_FORMAT = sDEFAULT_DATE_FORMAT
+  endif
 
   ! obtain user-supplied values, if any
   pDATE_1 => pBlock%getString("DATE_1")
   pTIME_1 => pBlock%getString("TIME_1")
   pDATE_2 => pBlock%getString("DATE_2")
   pTIME_2 => pBlock%getString("TIME_2")
+  pDATE_FORMAT => pBlock%getString("DATE_FORMAT")
+  pTIME_FORMAT => pBlock%getString("TIME_FORMAT")
 
   call warn(.not. (str_compare(pDATE_1(1),"NA") .and. str_compare(pDATE_2(1),"NA")), &
     "No date argument was supplied in the "//trim(pBlock%sBlockname)//" block " &
@@ -86,7 +98,12 @@ subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
   if(.not. str_compare(pDATE_2(1),"NA"))  sDATE_2 = trim(pDATE_2(1))
   if(.not. str_compare(pTIME_1(1),"NA"))  sTIME_1 = trim(pTIME_1(1))
   if(.not. str_compare(pTIME_2(1),"NA"))  sTIME_2 = trim(pTIME_2(1))
+  if(.not. str_compare(pDATE_FORMAT(1),"NA"))  sDATE_FORMAT = trim(pDATE_FORMAT(1))
+  if(.not. str_compare(pTIME_FORMAT(1),"NA"))  sTIME_FORMAT = trim(pTIME_FORMAT(1))
 
+  ! set date format to the standard format shown in the manual
+  call tDATETIME_1%setDateFormat("MM/DD/YYYY")
+  call tDATETIME_1%setTimeFormat("HH:MM:SS")
   call tDATETIME_1%parseDate(sDATE_1)
   call tDATETIME_1%parseTime(sTIME_1)
   call tDATETIME_1%calcJulianDay()
@@ -95,10 +112,14 @@ subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
   call tDATETIME_2%parseTime(sTIME_2)
   call tDATETIME_2%calcJulianDay()
 
+  ! now set format to the date format specified by the user for this block
+  call tDATETIME_1%setDateFormat(sDATE_FORMAT)
+  call tDATETIME_1%setTimeFormat(sTIME_FORMAT)
+
   call Assert(tDATETIME_2 > tDATETIME_1, &
     "DATE_2 and TIME_2 must be greater than DATE_1 and TIME_1", trim(__FILE__),__LINE__)
 
-  deallocate(pDATE_1, pTIME_1, pDATE_2, pTIME_2)
+  deallocate(pDATE_1, pTIME_1, pDATE_2, pTIME_2, pDATE_FORMAT, pTIME_FORMAT)
 
 end subroutine processUserSuppliedDateTime
 
@@ -135,7 +156,6 @@ subroutine close_file_sub(this)
   this%sFilename = "none"
   this%iLineNumber = 0
   this%sActiveContext = "NA"
-  this%sDateFormat = "MM/DD/YYYY"
 
 end subroutine close_file_sub
 
@@ -602,22 +622,22 @@ subroutine process_settings_block_sub(this, pBlock)
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: iStat
-  character (len=MAXARGLENGTH), dimension(:), pointer :: pActiveContext
-  character (len=MAXARGLENGTH), dimension(:), pointer :: pDateFormat
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pCONTEXT
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pDATE_FORMAT
 
-  pActiveContext => pBlock%getString("CONTEXT")
-  pDateFormat => pBlock%getString("DATE_FORMAT")
+  pCONTEXT => pBlock%getString("CONTEXT")
+  pDATE_FORMAT => pBlock%getString("DATE_FORMAT")
 
-  call Assert(size(pActiveContext)==1, "Only one 'CONTEXT' keyword allowed in a SETTINGS block", &
+  call Assert(size(pCONTEXT)==1, "Only one 'CONTEXT' keyword allowed in a SETTINGS block", &
     trim(__FILE__),__LINE__)
-  call Assert(size(pDateFormat)==1, "Only one 'DATE_FORMAT' keyword allowed in a SETTINGS block", &
+  call Assert(size(pDATE_FORMAT)==1, "Only one 'DATE_FORMAT' keyword allowed in a SETTINGS block", &
     trim(__FILE__),__LINE__)
 
-  this%sDateFormat = pDateFormat(1)
-  this%sActiveContext = uppercase(trim(pActiveContext(1)))
+  call setDefaultDateFormat(trim( uppercase( pDATE_FORMAT(1)) ) )
+  this%sActiveContext = uppercase(trim(pCONTEXT(1)) )
 
-  deallocate(pDateFormat)
-  deallocate(pActiveContext)
+  deallocate(pDATE_FORMAT)
+  deallocate(pCONTEXT)
 
 end subroutine process_settings_block_sub
 

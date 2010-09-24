@@ -12,6 +12,7 @@ module tsp_collections
   type T_TS_COMPARISON
     character (len=MAXNAMELENGTH) :: sObservedSeries = ""
     character (len=MAXNAMELENGTH) :: sModeledSeries = ""
+    character (len=MAXNAMELENGTH) :: sObservationGroup = ""
     character (len=1024) :: sWeightsEquation
     real (kind=T_SGL), dimension(:), allocatable :: rWeightValue
   end type T_TS_COMPARISON
@@ -19,6 +20,7 @@ module tsp_collections
   type T_TABLE_COMPARISON
     character (len=MAXNAMELENGTH) :: sObservedTable = ""
     character (len=MAXNAMELENGTH) :: sModeledTable = ""
+    character (len=MAXNAMELENGTH) :: sObservationGroup = ""
     character (len=1024) :: sWeightsEquation
     real (kind=T_SGL), dimension(:), allocatable :: rWeightValue
   end type T_TABLE_COMPARISON
@@ -47,8 +49,11 @@ module tsp_collections
     procedure :: describe => describe_ts_sub
     procedure :: getTS => get_ts_pointer_fn
     procedure :: getTSComparison => get_ts_comparison_pointer_fn
+    procedure :: getTableComparison => get_table_comparison_pointer_fn
     procedure :: getTable => get_table_pointer_fn
     procedure :: listTS => list_output_ts_sub
+    procedure :: pestWriteTSComparison => pest_write_ts_comparison_sub
+    procedure :: pestWriteTableComparison => pest_write_table_comparison_sub
     procedure :: listTable => list_output_table_sub
     procedure :: datesEqual => are_datetime_stamps_identical_fn
 
@@ -104,7 +109,7 @@ contains
 
       ! ensure that the minimum and maximum date range fields are populated
       ! before adding the TS object to the collection
-      call tTS%findDateMinAndMax()
+!      call tTS%findDateMinAndMax()
 
       this%tTS(iCount+1) = tTS
       this%tTS(iCount+1)%tData = tTS%tData
@@ -123,7 +128,7 @@ contains
 
       ! ensure that the minimum and maximum date range fields are populated
       ! before adding the TS object to the collection
-      call tTS%findDateMinAndMax()
+!      call tTS%findDateMinAndMax()
 
       this%tTS(1) = tTS
 
@@ -491,6 +496,47 @@ contains
 
 !------------------------------------------------------------------------------
 
+  function get_table_comparison_pointer_fn(this, sObservedTable, sModeledTable) &
+                                                            result( pTableComparison )
+
+    ! get values associated with tTS from a COLLECTION of time series objects (this)
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sObservedTable
+    character (len=*) :: sModeledTable
+    type(T_TABLE_COMPARISON), pointer :: pTableComparison
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iCount
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i, j
+    logical (kind=T_LOGICAL) :: lMatch
+
+    if(allocated(this%tTableComparison)) then
+
+      ! get the number of tables currently in table comparison container
+      iCount = size(this%tTableComparison)
+
+      ! check to see whether these tables have been compared already
+      lMatch = lFALSE
+      do i = 1,iCount
+        if(str_compare(this%tTableComparison(i)%sObservedTable, sObservedTable) &
+            .and. str_compare(this%tTableComparison(i)%sModeledTable, sModeledTable) ) then
+          lMatch = lTRUE
+          exit
+        endif
+      end do
+
+      call Assert(lMatch, "No table comparisons between the series "//trim(sObservedTable)// &
+         " and "//trim(sModeledTable)//" could be found",trim(__FILE__),__LINE__)
+
+      pTableComparison => this%tTableComparison(i)
+
+    endif
+
+  end function get_table_comparison_pointer_fn
+
+!------------------------------------------------------------------------------
+
   function get_table_pointer_fn(this, sSeriesName)    result( pTable )
 
     ! get values associated with tTable from a COLLECTION of table objects (this)
@@ -540,6 +586,7 @@ contains
     integer (kind=T_INT) :: iSum
     real (kind=T_SGL) :: rSSE
     type (T_TIME_SERIES), pointer :: pObservedSeries, pModeledSeries
+    type (T_TABLE), pointer :: pObservedTable, pModeledTable
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
@@ -611,7 +658,7 @@ contains
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE COMPARISON OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
-      fmt="('OBSERVED SERIES    MODELED SERIES          DATE RANGE')")
+      fmt="('OBSERVED SERIES    MODELED SERIES          DATE RANGE    COUNT    RESIDUAL')")
 
     if(.not. allocated(this%tTSComparison)) then
       write(LU_STD_OUT,fmt="(a,/)") &
@@ -629,7 +676,6 @@ contains
 
         do j=1,size(pObservedSeries%tData%rValue)
 
-
           rSSE = rSSE + ((pObservedSeries%tData(j)%rValue &
                  - pModeledSeries%tData(j)%rValue ) **2 &
                  * this%tTSComparison(i)%rWeightValue(j)**2)
@@ -645,6 +691,42 @@ contains
 
       end do
     endif
+
+    write(LU_STD_OUT, &
+      fmt="('OBSERVED TABLE    MODELED TABLE          DATE RANGE    COUNT    RESIDUAL')")
+    if(.not. allocated(this%tTableComparison)) then
+      write(LU_STD_OUT,fmt="(a,/)") &
+        '     ===> No TABLE COMPARISON objects currently in memory <==='
+
+    else
+
+      iCount = size(this%tTableComparison)
+
+      do i=1,iCount
+
+        pObservedTable => this%getTable(this%tTableComparison(i)%sObservedTable)
+        pModeledTable => this%getTable(this%tTableComparison(i)%sModeledTable)
+        rSSE = 0.
+
+        do j=1,size(pObservedTable%tTableData%sValue)
+
+
+          rSSE = rSSE + (( asReal(pObservedTable%tTableData(j)%sValue) &
+                 - asReal(pModeledTable%tTableData(j)%sValue) ) **2 &
+                 * this%tTableComparison(i)%rWeightValue(j)**2)
+
+        enddo
+
+        write(LU_STD_OUT,fmt="(a18,1x,a18,1x,a10,'-',a10, i10, g16.8)") &
+          this%tTableComparison(i)%sObservedTable, &
+          this%tTableComparison(i)%sModeledTable, &
+          pObservedTable%tStartDate%prettyDate(), &
+          pObservedTable%tEndDate%prettyDate(), &
+          size(pObservedTable%tTableData), rSSE
+
+      end do
+    endif
+
 
   end subroutine summarize_sub
 
@@ -688,6 +770,46 @@ contains
 
 
   end subroutine describe_ts_sub
+
+!------------------------------------------------------------------------------
+  subroutine pest_write_ts_comparison_sub(this, sObservedSeries, sModeledSeries, iLU)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sObservedSeries
+    character (len=*) :: sModeledSeries
+    integer (kind=T_INT), optional :: iLU
+
+    ! [ LOCALS ]
+    type(T_TS_COMPARISON), pointer :: pTSComparison
+    type(T_TIME_SERIES), pointer :: pObservedSeries
+    integer (kind=T_INT) :: LU
+    character (len=256) :: sFormatString
+    integer (kind=T_INT) :: i
+
+    if(present(iLU)) then
+      LU = iLU
+    else
+      LU = LU_STD_OUT
+    endif
+
+    pTSComparison => this%getTSComparison(sObservedSeries, sModeledSeries)
+    pObservedSeries => this%getTS(sObservedSeries)
+
+    sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,g16.8,3x,g16.8,3x,a)"
+
+    ! add observation numbers to the end of the observation name
+    do i=1,size(pObservedSeries%tData)
+
+       write(LU,fmt=trim(sFormatString)) &
+          trim(pObservedSeries%sSeriesName)//"_"//trim(asChar(i) ), &
+          pObservedSeries%tData(i)%rValue, pTSComparison%rWeightValue(i), &
+          pTSComparison%sObservedSeries
+
+    enddo
+
+    nullify(pTSComparison, pObservedSeries)
+
+  end subroutine pest_write_ts_comparison_sub
 
 !------------------------------------------------------------------------------
 
@@ -755,7 +877,51 @@ contains
 
     call pTable%list(sDateFormat, iLU)
 
+    nullify(pTable)
+
   end subroutine list_output_table_sub
+
+
+!------------------------------------------------------------------------------
+
+  subroutine pest_write_table_comparison_sub(this, sObservedSeries, sModeledSeries, iLU)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sObservedSeries
+    character (len=*) :: sModeledSeries
+    integer (kind=T_INT), optional :: iLU
+
+    ! [ LOCALS ]
+    type(T_TABLE_COMPARISON), pointer :: pTableComparison
+    type(T_TABLE), pointer :: pTable
+    integer (kind=T_INT) :: LU
+    character (len=256) :: sFormatString
+    integer (kind=T_INT) :: i
+
+    if(present(iLU)) then
+      LU = iLU
+    else
+      LU = LU_STD_OUT
+    endif
+
+    pTableComparison => this%getTableComparison(sObservedSeries, sModeledSeries)
+    pTable => this%getTable(sObservedSeries)
+
+    sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,a20,3x,g16.8,3x,a)"
+
+    ! add observation numbers to the end of the observation name
+    do i=1,size(pTable%tTableData)
+
+       write(LU,fmt=trim(sFormatString)) &
+          trim(pTable%sSeriesName)//"_"//trim(asChar(i) ), &
+          pTable%tTableData(i)%sValue, pTableComparison%rWeightValue(i), &
+          trim(pTable%sSeriesName)
+
+    enddo
+
+    nullify(pTableComparison, pTable)
+
+  end subroutine pest_write_table_comparison_sub
 
 !------------------------------------------------------------------------------
 
@@ -899,6 +1065,7 @@ contains
     integer (kind=T_INT) :: iCountObserved, iCountModeled
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: i
+    integer (kind=T_INT) :: iNumDigits
     integer (kind=T_INT) :: iRecordToReplace
     logical (kind=T_LOGICAL) :: lIsNewComparison
 
@@ -921,6 +1088,14 @@ contains
 
         iCountObserved = size(pObservedSeries%tData)
         iCountModeled = size(pModeledSeries%tData)
+
+        iNumDigits = len_trim(asChar(iCountObserved) )
+
+        if(len_trim(sObservedSeries) + 1 + iNumDigits > MAXNAMELENGTH) then
+          call warn(lFALSE, "Cannot create comparison object: the series name " &
+            //quote(sObservedSeries)//" is too long to allow for unique observation names to be created.")
+          exit
+        endif
 
         if(.not. allocated(this%tTSComparison)) then
 
@@ -1022,6 +1197,9 @@ contains
     integer (kind=T_INT) :: iCountObserved, iCountModeled
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: i
+    integer (kind=T_INT) :: iNumDigits
+    integer (kind=T_INT) :: iRecordToReplace
+    logical (kind=T_LOGICAL) :: lIsNewComparison
 
     ! get pointers to the two series involved
     pObservedTable => this%getTable(sObservedTable)
@@ -1030,6 +1208,103 @@ contains
     iCountObserved = size(pObservedTable%tTableData)
     iCountModeled = size(pModeledTable%tTableData)
     iCount = 0
+
+    lIsNewComparison = lTRUE
+
+    do
+
+      if( iCountObserved /= iCountModeled) then
+
+        call warn(lFALSE, "Cannot create comparison object: "//trim(sObservedTable) &
+          //" and "//trim(sModeledTable)//" do not have the same number of entries.")
+        exit
+
+      else  ! the two tables at least have the same number of entries; proceed
+
+        iNumDigits = len_trim(asChar(iCountObserved) )
+
+        if(len_trim(sObservedTable) + 1 + iNumDigits > MAXNAMELENGTH) then
+          call warn(lFALSE, "Cannot create comparison object: the table name " &
+            //quote(sObservedTable)//" is too long to allow for unique observation names to be created.")
+          exit
+        endif
+
+        if(.not. allocated(this%tTableComparison)) then
+
+          allocate(this%tTableComparison(1),stat=iStat)
+          call Assert(iStat==0, "Unable to allocate memory for table comparison", &
+            TRIM(__FILE__), __LINE__)
+
+          this%tTableComparison(iCount + 1)%sObservedTable = sObservedTable
+          this%tTableComparison(iCount + 1)%sModeledTable = sModeledTable
+          this%tTableComparison(1)%sWeightsEquation = sEquationText
+          allocate(this%tTableComparison(1)%rWeightValue(iCountObserved) , stat=iStat)
+          call Assert(iStat==0, "Unable to allocate memory for table comparison", &
+              TRIM(__FILE__), __LINE__)
+          this%tTableComparison(1)%rWeightValue = this%calculate(sEquationText, iCountObserved)
+
+        else   ! there are already table comparison objects; add or replace
+
+          ! get the number of table comparisons currently in table comparisons container
+          iCount = size(this%tTableComparison)
+
+          ! test to see if this comparison object already exists
+          do i=1,iCount
+            if( str_compare(this%tTableComparison(i)%sObservedTable, sObservedTable) &
+              .and. str_compare(this%tTableComparison(i)%sModeledTable, sModeledTable) ) then
+                lIsNewComparison = lFALSE
+                iRecordToReplace = i
+                exit
+            endif
+          enddo
+
+          if( lIsNewComparison ) then
+            ! allocate memory for size of current TableComparison object
+            allocate(tTempTableComparison(iCount),stat=iStat)
+            call Assert(iStat==0, "Unable to allocate temporary memory for table " &
+              //"comparison object", &
+              TRIM(__FILE__), __LINE__)
+
+            ! make a copy of all previous table objects
+            tTempTableComparison = this%tTableComparison
+
+            ! deallocate table comparison objects collection
+            deallocate(this%tTableComparison, stat=iStat)
+            call Assert(iStat==0, "Unable to deallocate memory for table " &
+            //"comparison object", &
+            TRIM(__FILE__), __LINE__)
+
+            ! allocate table comparison objects collection to include room for new object
+            allocate(this%tTableComparison(iCount + 1), stat=iStat)
+            call Assert(iStat==0, "Unable to allocate memory for table comparison object", &
+              TRIM(__FILE__), __LINE__)
+
+            this%tTableComparison(1:iCount) = tTempTableComparison
+
+            this%tTableComparison(iCount + 1)%sObservedTable = sObservedTable
+            this%tTableComparison(iCount + 1)%sModeledTable = sModeledTable
+            this%tTableComparison(iCount + 1)%sWeightsEquation = sEquationText
+            allocate(this%tTableComparison(iCount + 1)%rWeightValue(iCountObserved) , stat=iStat)
+            call Assert(iStat==0, "Unable to allocate memory for table comparison", &
+              TRIM(__FILE__), __LINE__)
+
+            this%tTableComparison(iCount + 1)%rWeightValue = this%calculate(sEquationText, iCountObserved)
+
+          else
+
+            ! if object already exists, just replace the equation text
+            this%tTableComparison(iRecordToReplace)%sWeightsEquation = sEquationText
+            this%tTableComparison(iRecordToReplace)%rWeightValue = this%calculate(sEquationText, iCountObserved)
+
+          endif  ! lIsNewComparison
+
+        endif  ! tTablecomparison .not. allocated
+
+        exit
+
+      endif  ! .not. dates are equal
+
+    enddo
 
   end subroutine add_table_comparison_sub
 
@@ -1151,5 +1426,7 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
   call TSCOL%clear()
 
 end function calc_values_from_equation_fn
+
+!------------------------------------------------------------------------------
 
 end module tsp_collections

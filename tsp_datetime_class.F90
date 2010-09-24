@@ -28,6 +28,9 @@ module tsp_datetime_class
     procedure, public :: parseTime => parse_text_to_time_sub
     procedure :: is_date_greater_than
 
+    procedure, public :: setTimeFormat => set_time_format_indices
+    procedure, public :: setDateFormat => set_Date_format_indices
+
     ! define operators that will work with datetime objects
     generic :: operator(>) => is_date_greater_than
     procedure :: is_date_less_than
@@ -70,7 +73,7 @@ module tsp_datetime_class
   end type T_MONTH
 
   ! constants for converting month numbers to month names
-  type (T_MONTH),dimension(12) :: MONTH = (/ &
+  type (T_MONTH),dimension(12), public :: MONTH = (/ &
     T_MONTH('JAN', 'January'), &
     T_MONTH('FEB', 'February'), &
     T_MONTH('MAR', 'March'), &
@@ -85,13 +88,115 @@ module tsp_datetime_class
     T_MONTH('DEC', 'December') &
    /)
 
+  ! the following values are determined by the date format string; defaults to MM/DD/YYYY
+  character (len=14), private :: sDATE_FORMAT = "MM/DD/YYYY"
+  character (len=14), public  :: sDEFAULT_DATE_FORMAT = "MM/DD/YYYY"
+  integer (kind=T_INT), private :: iScanMM1 = 1
+  integer (kind=T_INT), private :: iScanMM2 = 2
+  integer (kind=T_INT), private :: iScanDD1 = 4
+  integer (kind=T_INT), private :: iScanDD2 = 5
+  integer (kind=T_INT), private :: iScanYYYY1 = 7
+  integer (kind=T_INT), private :: iScanYYYY2 = 10
+
+  character (len=14), private :: sTIME_FORMAT = "HH:MM:SS"
+  character (len=14), public  :: sDEFAULT_TIME_FORMAT = "HH:MM:SS"
+  integer (kind=T_INT), private :: iScanHour1 = 1
+  integer (kind=T_INT), private :: iScanHour2 = 2
+  integer (kind=T_INT), private :: iScanMin1 = 4
+  integer (kind=T_INT), private :: iScanMin2 = 5
+  integer (kind=T_INT), private :: iScanSec1 = 7
+  integer (kind=T_INT), private :: iScanSec2 = 8
+
 contains
 
-subroutine parse_text_to_date_sub(this, sString, sDateFormat)
+subroutine setDefaultDateFormat(sDateFormat)
+
+  character (len=*), intent(in) :: sDateFormat
+
+  sDEFAULT_DATE_FORMAT = sDateFormat
+
+end subroutine setDefaultDateFormat
+
+!------------------------------------------------------------------------------
+
+subroutine setDefaultTimeFormat(sTimeFormat)
+
+  character (len=*), intent(in) :: sTimeFormat
+
+  sDEFAULT_TIME_FORMAT = sTimeFormat
+
+end subroutine setDefaultTimeFormat
+
+!------------------------------------------------------------------------------
+
+subroutine set_date_format_indices(this, sDateFormat)
+
+  class (T_DATETIME), intent(inout) :: this
+  character (len=*), intent(in), optional :: sDateFormat
+
+  ! [ LOCALS ]
+  character (len=14) :: sDateFmt
+
+  if(present(sDateFormat) ) then
+    sDateFmt = sDateFormat
+    sDATE_FORMAT = sDateFormat
+  else
+    sDateFmt = sDEFAULT_DATE_FORMAT
+  endif
+
+  iScanMM1 = scan(string=sDateFmt,set="M")
+  iScanMM2 = scan(string=sDateFmt,set="M", back=lTRUE )
+  iScanDD1 = scan(string=sDateFmt,set="D")
+  iScanDD2 = scan(string=sDateFmt,set="D", back=lTRUE )
+  iScanYYYY1 = scan(string=sDateFmt,set="Y")
+  iScanYYYY2 = scan(string=sDateFmt,set="Y", back=lTRUE )
+
+  call Assert(iScanMM1 > 0 .and. iScanMM2 > 0 &
+        .and. iScanDD1 > 0 .and. iScanDD2 > 0 &
+        .and. iScanYYYY1 > 0 .and. iScanYYYY2 > 0, &
+        "Failed to properly parse the date format string "//quote(sDateFormat), &
+        trim(__FILE__), __LINE__)
+
+end subroutine set_date_format_indices
+
+!------------------------------------------------------------------------------
+
+subroutine set_time_format_indices(this, sTimeFormat)
+
+  class (T_DATETIME), intent(inout) :: this
+  character (len=*), intent(in), optional :: sTimeFormat
+
+  ! [ LOCALS ]
+  character (len=14) :: sTimeFmt
+
+  if(present(sTimeFormat) ) then
+    sTimeFmt = sTimeFormat
+    sTIME_FORMAT = sTimeFormat
+  else
+    sTimeFmt = sTIME_FORMAT     ! if no arg supplied, default to module variable
+  endif
+
+  iScanHour1 = scan(string=sTimeFmt,set="H")
+  iScanHour2 = scan(string=sTimeFmt,set="H", back=lTRUE )
+  iScanMin1 = scan(string=sTimeFmt,set="M")
+  iScanMin2 = scan(string=sTimeFmt,set="M", back=lTRUE )
+  iScanSec1 = scan(string=sTimeFmt,set="S")
+  iScanSec2 = scan(string=sTimeFmt,set="S", back=lTRUE )
+
+  call Assert(iScanHour1 > 0 .and. iScanHour2 > 0 &
+        .and. iScanMin1 > 0 .and. iScanMin2 > 0 &
+        .and. iScanSec1 > 0 .and. iScanSec2 > 0, &
+        "Failed to properly parse the time format string "//quote(sTimeFormat), &
+        trim(__FILE__), __LINE__)
+
+end subroutine set_time_format_indices
+
+!------------------------------------------------------------------------------
+
+subroutine parse_text_to_date_sub(this, sString)
 
   class (T_DATETIME), intent(inout) :: this
   character (len=*), intent(in) :: sString
-  character (len=*), intent(in), optional :: sDateFormat
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: iStat
@@ -99,27 +204,14 @@ subroutine parse_text_to_date_sub(this, sString, sDateFormat)
   integer (kind=T_INT) :: iDay
   integer (kind=T_INT) :: iYear
   integer (kind=T_INT) :: iMonthOffset, iDayOffset
-  character (len=DATETEXTLENGTH) :: sDateFmt
   character (len=DATETEXTLENGTH) :: sStr
   character (len=256) :: sMonth, sDay, sYear, sBuf
-
-  integer (kind=T_INT) :: iScanMM1, iScanMM2
-  integer (kind=T_INT) :: iScanDD1, iScanDD2
-  integer (kind=T_INT) :: iScanYYYY1, iScanYYYY2
-
-  if(present(sDateFormat)) then
-    sDateFmt = uppercase( trim(adjustl(sDateFormat)) )
-  else
-    sDateFmt = "MM/DD/YYYY"
-  endif
 
   ! these offset amounts have value of 1 if the program detects a single-digit date value
   iMonthOffset = 0; iDayOffset = 0
 
   sStr = trim(adjustl(sString))
 
-  iScanMM1 = scan(string=sDateFmt,set="M")
-  iScanMM2 = scan(string=sDateFmt,set="M", back=lTRUE )
   sMonth = sStr(iScanMM1 : iScanMM2 )
   sBuf = clean(sMonth)
   if(len_trim(sBuf) /= len_trim(sMonth)) then   ! we have a case where there is no leading zero
@@ -128,12 +220,9 @@ subroutine parse_text_to_date_sub(this, sString, sDateFormat)
   endif
   read(sMonth,fmt=*, iostat = iStat) iMonth
   call Assert(iStat==0, "Error parsing month value from text file - got "//trim(sBuf)//";"// &
-  " date format: "//trim(sDateFmt)//" | date text: "//trim(sStr), &
-    TRIM(__FILE__),__LINE__)
+    " date text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
-  iScanDD1 = scan(string=sDateFmt,set="D") - iMonthOffset
-  iScanDD2 = scan(string=sDateFmt,set="D", back=lTRUE ) - iMonthOffset
-  sDay = sStr( iScanDD1 : iScanDD2 )
+  sDay = sStr( iScanDD1 - iMonthOffset : iScanDD2 -iMonthOffset )
   sBuf = clean(sDay)
   if(len_trim(sBuf) /= len_trim(sDay)) then   ! we have a case where there is no leading zero
     iDayOffset = 1
@@ -141,16 +230,12 @@ subroutine parse_text_to_date_sub(this, sString, sDateFormat)
   endif
   read(sDay, fmt=*, iostat = iStat) iDay
   call Assert(iStat==0, "Error parsing day value from text file - got "//trim(sBuf)//";"// &
-  " date format: "//trim(sDateFmt)//" | date text: "//trim(sStr), &
-    TRIM(__FILE__),__LINE__)
+    " date text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
-  iScanYYYY1 = scan(string=sDateFmt,set="Y") - iMonthOffset - iDayOffset
-  iScanYYYY2 = scan(string=sDateFmt,set="Y", back=lTRUE ) - iMonthOffset - iDayOffset
-  sBuf = sStr( iScanYYYY1 : iScanYYYY2 )
+  sBuf = sStr( iScanYYYY1 - iMonthOffset - iDayOffset: iScanYYYY2 - iMonthOffset - iDayOffset)
   read(sBuf,fmt=*, iostat = iStat) iYear
   call Assert(iStat==0, "Error parsing year value from text file - got "//trim(sBuf)//";"// &
-  " date format: "//trim(sDateFmt)//" | date text: "//trim(sStr), &
-    TRIM(__FILE__),__LINE__)
+    " date text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
   if(iYear <= 99 ) iYear = iYear + 1900    ! this might be a lethal assumption
 
@@ -162,11 +247,11 @@ end subroutine parse_text_to_date_sub
 
 !------------------------------------------------------------------------------
 
-subroutine parse_text_to_time_sub(this, sString, sTimeFormat)
+subroutine parse_text_to_time_sub(this, sString)
 
   class (T_DATETIME), intent(inout) :: this
   character (len=*), intent(in) :: sString
-  character (len=*), intent(in), optional :: sTimeFormat
+
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: iStat
@@ -184,36 +269,29 @@ subroutine parse_text_to_time_sub(this, sString, sTimeFormat)
 
   iOffset = 0
 
-  if(present(sTimeFormat)) then
-    sTimeFmt = uppercase( trim(adjustl(sTimeFormat)) )
-  else
-    sTimeFmt = "HH:MM:SS"
-  endif
-
   sStr = trim(adjustl(sString))
 
-  sHour =   sStr(scan(string=sTimeFmt,set="H") : scan(string=sTimeFmt,set="H", back=lTRUE ) )
+  sHour =   sStr( iScanHour1 : iScanHour2 )
 
   sBuf = clean(sHour)
   if(len_trim(sBuf) /= len_trim(sHour)) then   ! we have a case where there is no leading zero
     iOffset = 1
     sHour = trim(sBuf)
   endif
-
   read(sHour,fmt=*, iostat = iStat) iHour
-  call Assert(iStat==0, "Error parsing hours value from format string: '"//trim(sTimeFmt)//"'", &
-    TRIM(__FILE__),__LINE__)
+  call Assert(iStat==0, "Error parsing hour value from text file - got "//trim(sBuf)//";"// &
+    " time text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
-  sMinute = sStr(scan(string=sTimeFmt,set="M")-iOffset : scan(string=sTimeFmt,set="M", back=lTRUE )-iOffset )
+  sMinute = sStr(iScanMin1 - iOffset : iScanMin2 - iOffset )
   read(sMinute,fmt=*, iostat = iStat) iMinute
-  call Assert(iStat==0, "Error parsing minutes value from format string: '"//trim(sTimeFmt)//"'", &
-    TRIM(__FILE__),__LINE__)
+  call Assert(iStat==0, "Error parsing minutes value from text file - got "//trim(sBuf)//";"// &
+    " time text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
-  if(scan(string=sTimeFmt,set="S") /= 0) then
-    sSecond = sStr(scan(string=sTimeFmt,set="S")-iOffset : scan(string=sTimeFmt,set="S", back=lTRUE )-iOffset )
+  if(iScanSec1 /= 0) then
+    sSecond = sStr(iScanSec1 - iOffset : iScanSec2 - iOffset )
     read(sSecond,fmt=*, iostat = iStat) iSecond
-    call Assert(iStat==0, "Error parsing seconds value from format string: '"//trim(sTimeFmt)//"'", &
-      TRIM(__FILE__),__LINE__)
+    call Assert(iStat==0, "Error parsing hour value from text file - got "//trim(sBuf)//";"// &
+      " time text: "//trim(sStr), TRIM(__FILE__),__LINE__)
   else
     iSecond = 0
   endif
@@ -677,11 +755,17 @@ subroutine system_time_to_date_sub(this)
   call DATE_AND_TIME(sDateText, sTimeText)
   call DATE_AND_TIME(VALUES = iValues)
 
-  call this%parseDate(sDateText, "YYYYMMDD")
-  call this%parseTime(sTimeText, "HHMMSS")
+  call this%setDateFormat("YYYYMMDD")
+  call this%setTimeFormat("HHMMSS")
+
+  call this%parseDate(sDateText)
+  call this%parseTime(sTimeText)
   call this%calcJulianDay()
   this%rFractionOfDay = this%rFractionOfDay + &
       (real(iValues(8), kind=T_DBL) / 86400_T_DBL / 1000_T_DBL) ! milliseconds
+
+  call this%setDateFormat()
+  call this%setTimeFormat()
 
 end subroutine system_time_to_date_sub
 
@@ -706,11 +790,13 @@ subroutine new_daterange_fm_text_sub(this, sStartDate, sStartTime, sEndDate, sEn
     sDateFormatText = "MM/DD/YYYY"
   endif
 
-  call this%tStartDate%parseDate(sStartDate, sDateFormatText)
+  call this%tStartDate%setDateFormat(sDateFormatText)
+
+  call this%tStartDate%parseDate(sStartDate)
   call this%tStartDate%parseTime(sStartTime)
   call this%tStartDate%calcJulianDay()
 
-  call this%tEndDate%parseDate(sEndDate, sDateFormatText)
+  call this%tEndDate%parseDate(sEndDate)
   call this%tEndDate%parseTime(sEndTime)
   call this%tEndDate%calcJulianDay()
 

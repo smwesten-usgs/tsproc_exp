@@ -10,7 +10,8 @@ F95		= gfortran
 GCC     = gcc
 
 #LIBPATH	= -L/cygdrive/c/usr/local/lib/gcc-lib/i686-pc-mingw/4.0.3
-LIB		= -lgfortran
+LIBPATH	= -L/cygdrive/d/SMWData/Source_Code/libanne4.0/lib
+LIB		= -lgfortran -lwdm -lutil -ladwdm
 
 # -luser32 -lgdi32
 

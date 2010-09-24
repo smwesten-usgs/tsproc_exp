@@ -12,13 +12,14 @@ module tsp_table_manager
   integer (kind=T_INT), parameter :: iCTABLE = 2
   integer (kind=T_INT), parameter :: iETABLE = 3
   integer (kind=T_INT), parameter :: iVTABLE = 4
+  integer (kind=T_INT), parameter :: iITABLE = 5
 
   integer (kind=T_INT), parameter :: iOBSERVED = 1
   integer (kind=T_INT), parameter :: iSIMULATED = 2
   integer (kind=T_INT), parameter :: iOTHER = 3
 
-  character (len=7), dimension(4), parameter :: TABLE_TYPE = &
-       (/ "S_TABLE", "C_TABLE", "E_TABLE", "V_TABLE" /)
+  character (len=7), dimension(5), parameter :: TABLE_TYPE = &
+       [ "S_TABLE", "C_TABLE", "E_TABLE", "V_TABLE" , "I_TABLE" ]
 
   type, public :: T_TABLE_DATA
     character (len=MAXARGLENGTH) :: sKeyword
@@ -47,6 +48,7 @@ module tsp_table_manager
     procedure, public :: calc_s_table => table_calc_s_table
     procedure, public :: calc_e_table => table_calc_e_table
     procedure, public :: calc_v_table => table_calc_v_table
+    procedure, public :: calc_i_table => table_calc_i_table
     procedure, public :: list => table_list_output_sub
     procedure, public :: new => new_table_sub
 
@@ -78,6 +80,103 @@ contains
       trim(__FILE__), __LINE__)
 
   end subroutine new_table_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine table_calc_i_table(this, pTS, pBlock)
+
+    class (T_TABLE) :: this
+    type (T_TIME_SERIES), pointer :: pTS
+    type (T_BLOCK), pointer, optional :: pBlock
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iSize
+    integer (kind=T_INT) :: i, j
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: iCount
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME, &
+       pNEW_I_TABLE_NAME
+
+    real (kind=T_SGL), dimension(:), allocatable :: rTempValue
+    type (T_DATETIME), dimension(:), allocatable :: tTempDateTime
+
+    type (T_STATS_COLLECTION), pointer :: pStats
+    type(T_HI), dimension(:), pointer :: MA
+
+    if(present(pBlock)) then  ! obtain user preferences for the I_TABLE from TSPROC input block
+
+      ! is a "DATE_1" construct present? If so, process user supplied dates
+      if(pBlock%select("DATE_1") > 0) then
+        call processUserSuppliedDateTime(pBlock, this%tStartDate, this%tEndDate)
+      else  ! use all available data
+        this%tStartDate = pTS%tStartDate
+        this%tEndDate = pTS%tEndDate
+      endif
+
+      ! restrict data to specified date range, if desired
+      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      call Assert(iCount > 0, "Problem calculating I_TABLE: no time series data within " &
+        //"specified date range", trim(__FILE__), __LINE__)
+      ! allocate memory for temporary data array
+      allocate(rTempValue(iCount))
+      allocate(tTempDateTime(iCount))
+      rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
+      tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
+
+      ! determine what the new I Table name should be....
+      pNEW_I_TABLE_NAME => pBlock%getString("NEW_I_TABLE_NAME")
+      if(str_compare(pNEW_I_TABLE_NAME(1), "NA")) then
+        this%sSeriesName = trim(pTS%sSeriesName)//"_HI" ! default value if none provided
+      else
+        this%sSeriesName = trim(pNEW_I_TABLE_NAME(1))
+      endif
+
+    else   ! ignore pBlock arguments; use default values in calculating I_TABLE
+
+      this%tStartDate = pTS%tStartDate
+      this%tEndDate = pTS%tEndDate
+
+      this%sSeriesName = trim(pTS%sSeriesName)//"_HI" ! default value if none provided
+
+      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      call Assert(iCount > 0, "Problem calculating I_TABLE: no time series data within " &
+        //"specified date range", trim(__FILE__), __LINE__)
+
+      ! allocate memory for temporary data array
+      allocate(rTempValue(iCount))
+      allocate(tTempDateTime(iCount))
+      rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
+      tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
+
+
+    endif
+
+    pStats => create_stats_object(rTempValue, tTempDateTime%iMonth, &
+                   tTempDateTime%iYear, tTempDateTime%iJulianDay)
+
+    MA => compute_hyd_indices_MA(pStats)
+
+    this%iTableType = iITABLE
+
+    ! allocate memory for TABLE object
+    allocate(this%tTableData(size(MA)) )
+
+    do i=1,size(MA)
+
+      this%tTableData(i)%sDescription = MA(i)%sHydrologicIndex
+      this%tTableData(i)%sValue = asChar(MA(i)%rValue)
+      this%tTableData(i)%sKeyword = ""
+
+    enddo
+
+     write(this%sHeader,fmt= &
+        "(3x,'Hydrologic index name',t46,'Hydrologic index value')")
+
+    deallocate(MA, pStats)
+    if(associated(pNEW_I_TABLE_NAME)) deallocate(pNEW_I_TABLE_NAME)
+    if(associated(pSERIES_NAME)) deallocate(pSERIES_NAME)
+
+  end subroutine table_calc_i_table
 
 !------------------------------------------------------------------------------
 
@@ -113,7 +212,7 @@ contains
 
     if(present(pBlock)) then  ! obtain user preferences for the E_TABLE
 
-      ! is a "DATE_1" construct present? If so, process user suplied dates
+      ! is a "DATE_1" construct present? If so, process user supplied dates
       if(pBlock%select("DATE_1") > 0) then
         call processUserSuppliedDateTime(pBlock, this%tStartDate, this%tEndDate)
       else  ! use all available data
@@ -123,7 +222,7 @@ contains
 
       ! restrict data to specified date range, if desired
       iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
-      call Assert(iCount > 0, "Problem calculating S_TABLE: no time series data within " &
+      call Assert(iCount > 0, "Problem calculating E_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
       ! allocate memory for temporary data array
       allocate(rTempValue(iCount))
@@ -171,7 +270,7 @@ contains
       this%sSeriesName = trim(pTS%sSeriesName)//"_EX" ! default value if none provided
 
       iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
-      call Assert(iCount > 0, "Problem calculating S_TABLE: no time series data within " &
+      call Assert(iCount > 0, "Problem calculating E_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
 
       ! allocate memory for temporary data array
@@ -712,6 +811,7 @@ end subroutine table_calc_v_table
     integer (kind=T_INT) :: i
     integer (kind=T_INT) :: LU
     character(len=20) :: sDateFmt
+    character (len=256) :: sFormatString
 
     if(present(iLU)) then
       LU = iLU
@@ -732,8 +832,8 @@ end subroutine table_calc_v_table
          write(LU,fmt="(t4,a48,t55,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
             trim(this%tTableData(i)%sValue)
       enddo
-    elseif( this%iTableType == iETABLE ) then
 
+    elseif( this%iTableType == iETABLE ) then
       write(LU,fmt= "(a)") trim(this%sHeader)
       do i=1,size(this%tTableData)
          write(LU,fmt="(t4,a,3x,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
@@ -741,10 +841,16 @@ end subroutine table_calc_v_table
       enddo
 
     elseif( this%iTableType == iVTABLE ) then
-
       write(LU,fmt= "(a)") trim(this%sHeader)
       do i=1,size(this%tTableData)
          write(LU,fmt="(t4,a58,t63,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
+            trim(this%tTableData(i)%sValue)
+      enddo
+
+    elseif( this%iTableType == iITABLE ) then
+      write(LU,fmt= "(a)") trim(this%sHeader)
+      do i=1,size(this%tTableData)
+         write(LU,fmt="(t4,a40,':',3x,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
             trim(this%tTableData(i)%sValue)
       enddo
 

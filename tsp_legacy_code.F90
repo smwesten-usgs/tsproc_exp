@@ -69,7 +69,7 @@ subroutine pest_files(pBlock, TS)
        integer ierr,icontext,itempfile,ioseries,iostable,iovtable,iodtable,i,iunit,j, &
        jline,numtempfile,ii1,ll,jj1,jj,kk,io,im,noterm,nmterm,iomseries,iomstable,  &
        iomvtable,iomdtable,iout,nsterm,iterm,il,siout,nobs,nobsgp,ieqnerr,nterm,nnterm, &
-       isnum,dd,nn,yy,mm,k,ixcon,auiyesno,itempunit,isvd,iaui,itemp,pcfunit
+       isnum,dd,nn,yy,mm,k,ixcon,auiyesno,itempunit,isvd,iaui,itemp,LU_PEST_CONTROL_FILE
        real rotemp,rmtemp,rprecis,weightmin,weightmax,totim,rtime,eigthresh
        integer, dimension (:), allocatable :: obsseries,obsstable,obsvtable, &
           obsdtable,modseries,modstable, &
@@ -210,9 +210,33 @@ subroutine pest_files(pBlock, TS)
             "No observation series or table names have been cited in WRITE_PEST_FILES block", &
             trim(__FILE__), __LINE__)
 
-       call assert(.not. str_compare(pOBSERVATION_SERIES_NAME(1),"NA"), &
+       call assert(.not. str_compare(pTEMPLATE_FILE(1),"NA"), &
             "At least one TEMPLATE_FILE keyword must be provided in WRITE_PEST_FILES block", &
             trim(__FILE__), __LINE__)
+
+       call assert (size(pMODEL_SERIES_NAME) == size(pOBSERVATION_SERIES_NAME), &
+           "You must provide a model series name for each observation series name", &
+           trim(__FILE__),__LINE__)
+
+       call assert (size(pMODEL_SERIES_NAME) == size(pSERIES_WEIGHTS_EQUATION), &
+           "You must provide a weights equation for each model and observation series pair", &
+           trim(__FILE__),__LINE__)
+
+       if( .not.  (str_compare(pOBSERVATION_SERIES_NAME(1),"NA")) ) then
+         ! create comparison objects for time series
+         do i=1,size(pMODEL_SERIES_NAME)
+           call TS%tsCompare(pOBSERVATION_SERIES_NAME(i), pMODEL_SERIES_NAME(i), &
+              pSERIES_WEIGHTS_EQUATION(i) )
+         enddo
+       endif
+
+       if( .not.  (str_compare(pOBSERVATION_TABLE_NAME(1),"NA")) ) then
+         ! create comparison objects for tables
+         do i=1,size(pMODEL_TABLE_NAME)
+           call TS%tsCompare(pOBSERVATION_TABLE_NAME(i), pMODEL_TABLE_NAME(i), &
+              pTABLE_WEIGHTS_EQUATION(i) )
+         enddo
+       endif
 
 !        if(pestctlfile == ' ')then
 !          write(amessage,230) trim(CurrentBlock_g)
@@ -1478,57 +1502,57 @@ subroutine pest_files(pBlock, TS)
 !          end if
 !        end if
 
-         open(newunit=pcfunit,file=trim(pNEW_PEST_CONTROL_FILE(1)),status='replace',iostat=ierr)
+         open(newunit=LU_PEST_CONTROL_FILE,file=trim(pNEW_PEST_CONTROL_FILE(1)),status='replace',iostat=ierr)
          call assert(ierr==0,"cannot open PEST control file "//quote(pNEW_PEST_CONTROL_FILE(1)), &
                  trim(__FILE__), __LINE__)
 
-!        open(unit=pcfunit,file=pestctlfile,iostat=ierr)
+!        open(unit=LU_PEST_CONTROL_FILE,file=pestctlfile,iostat=ierr)
 !        if(ierr.ne.0)then
 !          write(amessage,830) trim(sString)
 !          go to 9800
 !        end if
-        write(pcfunit,fmt="(a)") 'pcf'
-        write(pcfunit,fmt="(a)") '* control data'
-        write(pcfunit,fmt="(a)") 'restart estimation'
-        write(pcfunit,fmt="(5i7)") npar,nobs,npargp,0,nobsgp
-        write(pcfunit,"(2i6,'   single   point   1   0   0')") numtempfile,1
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") 'pcf'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '* control data'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") 'restart estimation'
+        write(LU_PEST_CONTROL_FILE,fmt="(5i7)") npar,nobs,npargp,0,nobsgp
+        write(LU_PEST_CONTROL_FILE,"(2i6,'   single   point   1   0   0')") numtempfile,1
 
         if(isvd == 0) then
-          write(pcfunit,fmt="(a)") '5.0   2.0    0.3    0.03    10  999'
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") '5.0   2.0    0.3    0.03    10  999'
         else
-          write(pcfunit,fmt="(a)") ' 1e-1   -4.0   0.3  0.03    10       999'
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") ' 1e-1   -4.0   0.3  0.03    10       999'
         end if
 
-        write(pcfunit,fmt="(a)") '5.0   5.0   1.0e-3'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '5.0   5.0   1.0e-3'
 
         if(auiyesno == 0)then
-          write(pcfunit,fmt="(a)") '0.1  noaui'
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") '0.1  noaui'
         else
-          write(pcfunit,fmt="(a)") '0.1   aui'
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") '0.1   aui'
         end if
-        write(pcfunit,fmt="(a)") '30   .005  4   4  .005   4'
-        write(pcfunit,fmt="(a)") '1    1    1'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '30   .005  4   4  .005   4'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '1    1    1'
 
         if(isvd == 1)then
-          write(pcfunit,fmt="(a)") '* singular value decomposition'
-          write(pcfunit,fmt="(a)") '1'
-          write(pcfunit,fmt="(i6,2x,1pg13.7)") npar,eigthresh
-          write(pcfunit,fmt="(a)") '0'
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") '* singular value decomposition'
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") '1'
+          write(LU_PEST_CONTROL_FILE,fmt="(i6,2x,1pg13.7)") npar,eigthresh
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") '0'
         end if
 !
 ! -- The "* parameter groups" section of the PEST control file is now written.
 !
-        write(pcfunit,fmt="(a)") '* parameter groups'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '* parameter groups'
 
         do igp=1,npargp
-          write(pcfunit,fmt="(a,t14,a,t27,1pg10.4,t39,1pg10.4,t51,a,t62,1pg10.4,2x,a)") &
+          write(LU_PEST_CONTROL_FILE,fmt="(a,t14,a,t27,1pg10.4,t39,1pg10.4,t51,a,t62,1pg10.4,2x,a)") &
             trim(pargpnme(igp)),trim(inctyp(igp)),derinc(igp), &
             derinclb(igp),trim(forcen(igp)),derincmul(igp), trim(dermthd(igp))
         end do
 !
  ! -- The "* parameter data" section of the PEST control file is now written.
 !
-        write(pcfunit,fmt="(a)") '* parameter data'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '* parameter data'
 
         ! first write out parameter data
         do ipar=1,npar
@@ -1539,7 +1563,7 @@ subroutine pest_files(pBlock, TS)
             atrans=partrans(ipar)
           end if
 
-          write(pcfunit,fmt="(a,t14,a,t21,a,t33,1pg12.5,t47,1pg12.5,t61,1pg12.5,t75, &
+          write(LU_PEST_CONTROL_FILE,fmt="(a,t14,a,t21,a,t33,1pg12.5,t47,1pg12.5,t61,1pg12.5,t75, &
             a,t89,1pg10.4,t101,1pg10.4,t113,'  1')") &
               trim(apar(ipar)),trim(atrans), trim(parchglim(ipar)),parval1(ipar), &
               parlbnd(ipar),parubnd(ipar),trim(pargp(ipar)),scale(ipar),offset(ipar)
@@ -1549,22 +1573,34 @@ subroutine pest_files(pBlock, TS)
         ! next write out a list of the parameters that are tied to other parameters
         do ipar=1,npar
           if(partrans(ipar)(1:4) == 'tied')then
-            write(pcfunit,fmt="(a,t14,a)") trim(apar(ipar)),trim(partrans(ipar)(6:))
+            write(LU_PEST_CONTROL_FILE,fmt="(a,t14,a)") trim(apar(ipar)),trim(partrans(ipar)(6:))
           end if
         end do
 !
+
+
+
+
+
+
+
 ! -- The "* observation groups" section of the PEST control file is now written.
 !
-        write(pcfunit,fmt="(a)") '* observation groups'
+        write(LU_PEST_CONTROL_FILE,fmt="(a)") '* observation groups'
 
         do i=1,nobsgp
-          write(pcfunit,fmt="(a)") trim(obgnme(i))
+          write(LU_PEST_CONTROL_FILE,fmt="(a)") trim(obgnme(i))
         end do
 !
 ! -- The "* observation data" section of the PEST control file is now written.
 ! -- First the time series observations are dealt with.
 !
-!        write(pcfunit,1705)
+
+
+
+
+
+!        write(LU_PEST_CONTROL_FILE,1705)
 ! 1705   format('* observation data')
 !
 !        iout=0
@@ -1647,7 +1683,7 @@ subroutine pest_files(pBlock, TS)
 !            if(ierr.ne.0) go to 9800
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
 ! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
 !          end do
 !        end do
@@ -1703,7 +1739,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),stable_g(io)%maximum,dval,trim(stable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),stable_g(io)%maximum,dval,trim(stable_g(im)%name)
 !          end if
 !
 !          if(stable_g(io)%minimum > -1.0e36)then
@@ -1725,7 +1761,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),stable_g(io)%minimum,dval,trim(stable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),stable_g(io)%minimum,dval,trim(stable_g(im)%name)
 !          end if
 !
 !          if(stable_g(io)%range > -1.0e36)then
@@ -1747,7 +1783,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),stable_g(io)%range,dval,trim(stable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),stable_g(io)%range,dval,trim(stable_g(im)%name)
 !          end if
 !
 !          if(stable_g(io)%total > -1.0e36)then
@@ -1769,7 +1805,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),stable_g(io)%total,dval,trim(stable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),stable_g(io)%total,dval,trim(stable_g(im)%name)
 !          end if
 !
 !          if(stable_g(io)%mean > -1.0e36)then
@@ -1791,7 +1827,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),stable_g(io)%mean,dval,trim(stable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),stable_g(io)%mean,dval,trim(stable_g(im)%name)
 !          end if
 !
 !          if(stable_g(io)%stddev > -1.0e36)then
@@ -1813,7 +1849,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),stable_g(io)%stddev,dval,trim(stable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),stable_g(io)%stddev,dval,trim(stable_g(im)%name)
 !          end if
 !
 !        end do
@@ -1871,7 +1907,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),vtable_g(io)%vol(j),dval,trim(vtable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),vtable_g(io)%vol(j),dval,trim(vtable_g(im)%name)
 !          end do
 !        end do
 !
@@ -1929,7 +1965,7 @@ subroutine pest_files(pBlock, TS)
 !            OPERAT,FUNCT,IORDER,DVAL,rterm)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
-!            write(pcfunit,1900) trim(aname),dtable_g(io)%time(j)/totim,dval,trim(dtable_g(im)%name)
+!            write(LU_PEST_CONTROL_FILE,1900) trim(aname),dtable_g(io)%time(j)/totim,dval,trim(dtable_g(im)%name)
 !          end do
 !        end do
 !
@@ -1939,17 +1975,17 @@ subroutine pest_files(pBlock, TS)
 !
 ! 2400   continue
 !
-!        write(pcfunit,2410)
+!        write(LU_PEST_CONTROL_FILE,2410)
 ! 2410   format('* model command line')
 !        if(modcomline == ' ')modcomline='model'
 ! !       call addquote(modcomline,bstring)
-! !       write(pcfunit,2420) trim(bstring)
-!        write(pcfunit,2420) trim(modcomline)
+! !       write(LU_PEST_CONTROL_FILE,2420) trim(bstring)
+!        write(LU_PEST_CONTROL_FILE,2420) trim(modcomline)
 ! 2420   format(a)
 !
 ! ! -- The "* model input/output" section of the PEST control file is written.
 !
-!        write(pcfunit,2430)
+!        write(LU_PEST_CONTROL_FILE,2430)
 ! 2430   format('* model input/output')
 !        do i=1,numtempfile
 !          if(modfile(i) == ' ')then
@@ -1958,13 +1994,13 @@ subroutine pest_files(pBlock, TS)
 !          end if
 !          call addquote(tempfile(i),bstring)
 !          call addquote(modfile(i),cstring)
-!          write(pcfunit,2440) trim(bstring),trim(cstring)
+!          write(LU_PEST_CONTROL_FILE,2440) trim(bstring),trim(cstring)
 ! 2440     format(a,3x,a)
 !        end do
 !        call addquote(instructfile,bstring)
 !        call addquote(sListOutputFile_g,cstring)
-!        write(pcfunit,2440) trim(bstring),trim(cstring)
-!        close(unit=pcfunit)
+!        write(LU_PEST_CONTROL_FILE,2440) trim(bstring),trim(cstring)
+!        close(unit=LU_PEST_CONTROL_FILE)
 !
 !
 !        write(*,2460) trim(sString)

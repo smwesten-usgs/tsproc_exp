@@ -21,8 +21,12 @@ contains
     character (len=MAXARGLENGTH), dimension(:), pointer :: pS_TABLE_NAME
     character (len=MAXARGLENGTH), dimension(:), pointer :: pV_TABLE_NAME
     character (len=MAXARGLENGTH), dimension(:), pointer :: pE_TABLE_NAME
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pI_TABLE_NAME
 
     integer (kind=T_INT) :: LU_LIST_OUTPUT
+    integer (kind=T_INT) :: LU_INSTRUCTIONS_FILE
+
+    character (len=256) :: sBuf
 
     integer (kind=T_INT) :: iSize    ! holds the size of various array arguments
     integer (kind=T_INT) :: i        ! generic loop index
@@ -32,6 +36,13 @@ contains
     open(newunit=LU_LIST_OUTPUT,file=TRIM(ADJUSTL(pFILE(1))),status='REPLACE',iostat=iStat)
     call Assert(iStat==0,'Error opening TSPROC output file '//TRIM(pFILE(1)), &
        trim(__FILE__), __LINE__)
+
+    sBuf = pFILE(1)(1:len_trim(pFILE(1))-3)
+
+    open(newunit=LU_INSTRUCTIONS_FILE,file=TRIM(sBuf)//"ins",status='REPLACE',iostat=iStat)
+    call Assert(iStat==0,'Error opening list output instruction file '//TRIM(pFILE(1)), &
+       trim(__FILE__), __LINE__)
+    write(unit=LU_INSTRUCTIONS_FILE, fmt=*) "pif $"
 
     ! reset position indicators (used to determine proper sequence of instructions)
     TS%tTS%iListOutputPosition = 0
@@ -45,9 +56,11 @@ contains
       if(iSize > 0) then
         do i=1,iSize
           ! is the current series name targeted in the "LIST_OUTPUT" block?
-          if( isElement(TS%tTS(i)%sSeriesname, pSERIES_NAME)) &
-             call TS%tTS(i)%list( iLU = LU_LIST_OUTPUT)
-             TS%tTS(i)%iListOutputPosition = MAXVAL(TS%tTS%iListOutputPosition) + 1
+          if( isElement(TS%tTS(i)%sSeriesname, pSERIES_NAME)) then
+            call TS%tTS(i)%list( iLU = LU_LIST_OUTPUT)
+            call TS%tTS(i)%writeInstructions( iLU = LU_INSTRUCTIONS_FILE)
+            TS%tTS(i)%iListOutputPosition = MAXVAL(TS%tTS%iListOutputPosition) + 1
+          endif
         enddo
       endif
     endif
@@ -59,10 +72,11 @@ contains
       pS_TABLE_NAME => pBlock%getString("S_TABLE_NAME")
 
       if(iSize > 0) then
-        do i=1,iSize
-          if( isElement(TS%tTable(i)%sSeriesname, pS_TABLE_NAME)) &
-             call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
-             TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+        do i=1,size(TS%tTable)
+          if( isElement(TS%tTable(i)%sSeriesname, pS_TABLE_NAME)) then
+            call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
+            TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+          endif
         enddo
       endif
     endif
@@ -74,10 +88,11 @@ contains
       pV_TABLE_NAME => pBlock%getString("V_TABLE_NAME")
 
       if(iSize > 0) then
-        do i=1,iSize
-          if( isElement(TS%tTable(i)%sSeriesname, pV_TABLE_NAME)) &
-             call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
-             TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+        do i=1,size(TS%tTable)
+          if( isElement(TS%tTable(i)%sSeriesname, pV_TABLE_NAME)) then
+            call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
+            TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+          endif
         enddo
       endif
     endif
@@ -89,10 +104,27 @@ contains
       pE_TABLE_NAME => pBlock%getString("E_TABLE_NAME")
 
       if(iSize > 0) then
-        do i=1,iSize
-          if( isElement(TS%tTable(i)%sSeriesname, pE_TABLE_NAME)) &
-             call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
-             TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+        do i=1,size(TS%tTable)
+          if( isElement(TS%tTable(i)%sSeriesname, pE_TABLE_NAME)) then
+            call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
+            TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+          endif
+        enddo
+      endif
+    endif
+
+    ! write LIST OUTPUT for I_TABLE objects
+    if(allocated(TS%tTable)) then
+      iSize = count(TS%tTable%iTableType == iITABLE)  ! get the number of I_TABLE objects
+
+      pI_TABLE_NAME => pBlock%getString("I_TABLE_NAME")
+
+      if(iSize > 0) then
+        do i=1,size(TS%tTable)
+          if( isElement(TS%tTable(i)%sSeriesname, pI_TABLE_NAME)) then
+            call TS%tTable(i)%list( iLU = LU_LIST_OUTPUT)
+            TS%tTable(i)%iListOutputPosition = MAXVAL(TS%tTable%iListOutputPosition) + 1
+          endif
         enddo
       endif
     endif
@@ -102,6 +134,7 @@ contains
     if(associated(pS_TABLE_NAME)) deallocate(pS_TABLE_NAME)
     if(associated(pV_TABLE_NAME)) deallocate(pV_TABLE_NAME)
     if(associated(pE_TABLE_NAME)) deallocate(pE_TABLE_NAME)
+    if(associated(pI_TABLE_NAME)) deallocate(pI_TABLE_NAME)
 
     flush(unit=LU_LIST_OUTPUT)
     close(unit=LU_LIST_OUTPUT)
