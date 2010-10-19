@@ -28,6 +28,7 @@ module tsp_control_file_ops
     procedure, public :: select => select_by_keyword_fn
     procedure, public :: index => find_by_keyword_fn
     procedure, public :: getString => get_character_values_by_keyword_fn
+    procedure, public :: findString => get_character_values_by_partial_keyword_fn
     procedure, public :: getReal => get_real_values_by_keyword_fn
     procedure, public :: getInt => get_integer_values_by_keyword_fn
     procedure, public :: new => new_block_from_list_sub
@@ -211,6 +212,8 @@ function read_block_fn(this)      result(pBlock)
     call Chomp(sLine, sArg)
 
     if( str_compare(sKey(1:1),"#")) cycle    ! ignore comments
+
+    call echolog(trim(sKey)//" "//trim(sArg))
 
     if( str_compare(sKey,"START")) then
       lInBlock = lTRUE
@@ -527,6 +530,51 @@ function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
   endif
 
 end function get_character_values_by_keyword_fn
+
+!------------------------------------------------------------------------------
+
+function get_character_values_by_partial_keyword_fn(this, sKeyword)    result(pArgs)
+
+  class ( T_BLOCK ) :: this
+  character (len=*) :: sKeyword
+  character(len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+!  character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: i, n, iCount, iStat
+
+  n = size(this%sKeyword)
+
+  do i=1,n
+    if(str_contains(this%sKeyword(i),sKeyword)) then
+      this%lSelect(i) = lTRUE
+    else
+      this%lSelect(i)=lFALSE
+    endif
+
+  enddo
+
+  iCount = count(this%lSelect)
+
+!  call Warn(iCount > 0,trim(sKeyword)// &
+!     " keyword was NOT found in the block starting at line number " &
+!     //trim(asChar(this%iStartingLineNumber))//": "//trim(this%sBlockname))
+
+  if(iCount == 0) then
+    allocate(pArgs(1), stat=iStat)
+    call Assert(iStat==0, "Problem with allocation",trim(__FILE__),__LINE__)
+    pArgs = ""
+    pArgs = "NA"
+  else
+    allocate(pArgs(iCount), stat=iStat)
+    call Assert(iStat==0, "Problem with allocation",trim(__FILE__),__LINE__)
+    pArgs = ""
+    pArgs = transfer(pack(this%sArg1,this%lSelect),pArgs)
+  endif
+
+end function get_character_values_by_partial_keyword_fn
+
+!------------------------------------------------------------------------------
 
 function get_integer_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 

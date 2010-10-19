@@ -23,9 +23,9 @@ module tsp_table_manager
 
   type, public :: T_TABLE_DATA
     character (len=MAXARGLENGTH) :: sKeyword
-    character (len=256) :: sDescription
-    character (len=256) :: sValue
-    logical (kind=T_LOGICAL) :: lSelect = lFALSE
+    character (len=256) :: sDescription = ""
+    character (len=18), dimension(3) :: sValue = ""
+!    logical (kind=T_LOGICAL) :: lSelect = lFALSE
   end type T_TABLE_DATA
 
 !  type, extends(T_TABLE_DATA) :: T_VTABLE_DATA
@@ -34,10 +34,10 @@ module tsp_table_manager
 !  end type T_VTABLE_DATA
 
   type, public :: T_TABLE
-    character (len=MAXNAMELENGTH) :: sSeriesName
-    character (len=256) :: sDescription
-    character (len=256) :: sHeader
-    integer (kind=T_INT) :: iTableType
+    character (len=MAXNAMELENGTH) :: sSeriesName = ""
+    character (len=256) :: sDescription = ""
+    character (len=256) :: sHeader = ""
+    integer (kind=T_INT) :: iTableType = 0
     integer (kind=T_INT) :: iListOutputPosition = 0
     type (T_DATETIME) :: tStartDate
     type (T_DATETIME) :: tEndDate
@@ -51,6 +51,7 @@ module tsp_table_manager
     procedure, public :: calc_i_table => table_calc_i_table
     procedure, public :: list => table_list_output_sub
     procedure, public :: new => new_table_sub
+    procedure, public :: writeInstructions => table_list_output_instructions_sub
 
   end type T_TABLE
 
@@ -90,7 +91,7 @@ contains
     type (T_BLOCK), pointer, optional :: pBlock
 
     ! [ LOCALS ]
-    integer (kind=T_INT) :: iSize
+    integer (kind=T_INT) :: iSizeMA, iSizeML
     integer (kind=T_INT) :: i, j
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: iCount
@@ -102,6 +103,7 @@ contains
 
     type (T_STATS_COLLECTION), pointer :: pStats
     type(T_HI), dimension(:), pointer :: MA
+    type(T_HI), dimension(:), pointer :: ML
 
     if(present(pBlock)) then  ! obtain user preferences for the I_TABLE from TSPROC input block
 
@@ -151,28 +153,48 @@ contains
 
     endif
 
+    ! get a pointer to a "stats_object" - this object contains all
+    ! calculated statistics on the time series by month, by year, by year and month
+    ! and for the overall time series. Once this call is made, we simply have to
+    ! pull out the statistics of interest.
     pStats => create_stats_object(rTempValue, tTempDateTime%iMonth, &
                    tTempDateTime%iYear, tTempDateTime%iJulianDay)
 
+    ! get a pointer to the MA block of streamflow statistics
     MA => compute_hyd_indices_MA(pStats)
+    ML => compute_hyd_indices_ML(pStats)
 
     this%iTableType = iITABLE
 
+    iSizeMA = size(MA)
+    iSizeML = size(ML)
+
     ! allocate memory for TABLE object
-    allocate(this%tTableData(size(MA)) )
+    allocate(this%tTableData( iSizeMA + iSizeML ) )
 
-    do i=1,size(MA)
+    ! transfer items from the "MA" block to a table object
+    do i=1,iSizeMA
 
-      this%tTableData(i)%sDescription = MA(i)%sHydrologicIndex
-      this%tTableData(i)%sValue = asChar(MA(i)%rValue)
-      this%tTableData(i)%sKeyword = ""
+      this%tTableData(i)%sDescription = "MA"//trim(asChar(i))//": " &
+         //trim( MA(i)%sHydrologicIndex)//": "
+      this%tTableData(i)%sValue(1) = asChar(MA(i)%rValue)
+!      this%tTableData(i)%sKeyword = ""
+
+    enddo
+
+    ! transfer items from the "ML" block to a table object
+    do i=1,iSizeML
+
+      this%tTableData(iSizeMA + i)%sDescription = "ML"//trim(asChar(i))//": " &
+         //trim( ML(i)%sHydrologicIndex)//": "
+      this%tTableData(iSizeMA + i)%sValue(1) = asChar(ML(i)%rValue)
 
     enddo
 
      write(this%sHeader,fmt= &
-        "(3x,'Hydrologic index name',t46,'Hydrologic index value')")
+        "(3x,'Hydrologic index name',t75,'Hydrologic index value')")
 
-    deallocate(MA, pStats)
+    deallocate(MA, ML , pStats)
     if(associated(pNEW_I_TABLE_NAME)) deallocate(pNEW_I_TABLE_NAME)
     if(associated(pSERIES_NAME)) deallocate(pSERIES_NAME)
 
@@ -205,10 +227,14 @@ contains
     real (kind=T_DBL), dimension(:), allocatable :: rDuration
     real (kind=T_DBL), dimension(:), allocatable :: rFractionOfTime
 
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pOVER_UNDER
+    logical (kind=T_LOGICAL) :: lOVER
     real (kind=T_SGL), dimension(:), pointer :: pFLOW, pDELAY
     real (kind=T_SGL), dimension(:), allocatable :: rFLOW, rDELAY
     real (kind=T_SGL), dimension(7), parameter :: DEFAULT_QUANTILES = &
                                          [0.1, 0.2, 0.3, 0.5, 0.75, 0.95, 0.99]
+
+    lOVER = lTRUE
 
     if(present(pBlock)) then  ! obtain user preferences for the E_TABLE
 
@@ -238,8 +264,6 @@ contains
         this%sSeriesName = trim(pNEW_E_TABLE_NAME(1))
       endif
 
-      print *, trim(this%sSeriesName)
-
       ! get FLOW values; if no FLOW values given, use default values
       pFLOW =>  pBlock%getReal("FLOW")
       if(pFLOW(1) > rNEAR_TINY) then
@@ -260,7 +284,10 @@ contains
         rDELAY = 0.0
       endif
 
-      deallocate(pFLOW, pDELAY, pNEW_E_TABLE_NAME)
+      pOVER_UNDER => pBlock%getString("OVER_UNDER")
+      if(str_compare(pOVER_UNDER(1),"under") ) lOVER = lFALSE
+
+      deallocate(pFLOW, pDELAY, pNEW_E_TABLE_NAME, pOVER_UNDER)
 
     else   ! ignore pBlock arguments; use default values in calculating E_TABLE
 
@@ -309,21 +336,40 @@ contains
 
       rAccumulation = rD_ZERO
 
-      ! if initial flow value exceeds the current flow threshold, set lACCUMULATE flag to true
-      if(rTempValue(1) >= rFLOW(i) ) then
-        lACCUMULATE = lTRUE
+      if(lOVER) then
+        ! if initial flow value exceeds the current flow threshold, set lACCUMULATE flag to true
+        if(rTempValue(1) > rFLOW(i) ) then
+          lACCUMULATE = lTRUE
+        else
+          lACCUMULATE = lFALSE
+        endif
       else
-        lACCUMULATE = lFALSE
+        ! if initial flow value is less than the current flow threshold, set lACCUMULATE flag to true
+        if(rTempValue(1) < rFLOW(i) ) then
+          lACCUMULATE = lTRUE
+        else
+          lACCUMULATE = lFALSE
+        endif
       endif
 
       ! begin iterating over all values
       do j=2, size(rTempValue)
         lACCUMULATING = lACCUMULATE
 
-        if(rTempValue(j) >= rFLOW(i) ) then
-          lACCUMULATE = lTRUE
+        if(lOVER) then
+          ! if initial flow value exceeds the current flow threshold, set lACCUMULATE flag to true
+          if(rTempValue(j) > rFLOW(i) ) then
+            lACCUMULATE = lTRUE
+          else
+            lACCUMULATE = lFALSE
+          endif
         else
-          lACCUMULATE = lFALSE
+          ! if initial flow value is less than the current flow threshold, set lACCUMULATE flag to true
+          if(rTempValue(j) < rFLOW(i) ) then
+            lACCUMULATE = lTRUE
+          else
+            lACCUMULATE = lFALSE
+          endif
         endif
 
         ! calculate the difference between current date and previous date (in fractional days)
@@ -363,19 +409,32 @@ contains
 !      write(this%tTableData(i)%sDescription, fmt="(f14.3, t18, f14.3)") &
 !          rFLOW(i), rDELAY(i)
 
-      this%tTableData(i)%sValue = asChar(rDuration(i), 18, 8)//"   " &
-         //asChar(rFractionOfTime(i), 18, 8)
 
-      this%tTableData(i)%sDescription = asChar(rFLOW(i), 18, 8)//"   " &
-         //asChar(rDELAY(i), 18, 8)
 
-      this%tTableData(i)%sKeyword = ""
+!      write(this%tTableData(i)%sValue, fmt="(a14,t27,a14)") &
+!        asChar(rDuration(i), 14, 8), asChar(rFractionOfTime(i), 14, 8)
+
+      this%tTableData(i)%sDescription = asChar(rFLOW(i), 14, 8)
+      this%tTableData(i)%sValue(1) = asChar(rDELAY(i), 14, 8)
+      this%tTableData(i)%sValue(2) = asChar(rDuration(i), 14, 8)
+      this%tTableData(i)%sValue(3) = asChar(rFractionOfTime(i), 14, 8)
+
+!      write(this%tTableData(i)%sDescription, fmt="(a14,t16,a14)") &
+!        asChar(rFLOW(i), 14, 8), asChar(rDELAY(i), 14, 8)
+
+!      this%tTableData(i)%sKeyword = ""
 
     enddo
 
-     write(this%sHeader,fmt= &
-        "(3x,'Flow',11x,'Time delay (days)',4x,'Time above (days)',3x,'Fraction of time above threshold')")
-
+    if(lOVER) then
+       write(this%sHeader,fmt= &
+          "(7x,'Flow',7x,'Time delay (days)',4x,'Time above (days)',5x," &
+            //"'Time above (fractional)')")
+    else
+       write(this%sHeader,fmt= &
+          "(7x,'Flow',7x,'Time delay (days)',4x,'Time below (days)',5x," &
+            //"'Time below (fractional)')")
+    endif
 
     deallocate( rDuration, rFractionOfTime)
     if(associated(pFLOW)) deallocate( pFLOW )
@@ -607,56 +666,56 @@ contains
 
     if(rValue(iSUM) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iSUM)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iSUM)
       this%tTableData(iCount)%sDescription = "Sum of values:"
       this%tTableData(iCount)%sKeyword = "SUM"
     endif
 
     if(rValue(iMINIMUM) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iMINIMUM)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iMINIMUM)
       this%tTableData(iCount)%sDescription = "Minimum value:"
       this%tTableData(iCount)%sKeyword = "MINIMUM"
     endif
 
     if(rValue(iMAXIMUM) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iMAXIMUM)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iMAXIMUM)
       this%tTableData(iCount)%sDescription = "Maximum value:"
       this%tTableData(iCount)%sKeyword = "MAXIMUM"
     endif
 
     if(rValue(iRANGE) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iRANGE)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iRANGE)
       this%tTableData(iCount)%sDescription = "Range of values:"
       this%tTableData(iCount)%sKeyword = "RANGE"
     endif
 
     if(rValue(iMEAN) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iMEAN)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iMEAN)
       this%tTableData(iCount)%sDescription = "Mean of values:"
       this%tTableData(iCount)%sKeyword = "MEAN"
     endif
 
     if(rValue(iSTD_DEV) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iSTD_DEV)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iSTD_DEV)
       this%tTableData(iCount)%sDescription = "Standard deviation of values:"
       this%tTableData(iCount)%sKeyword = "STD_DEV"
     endif
 
     if(rValue(iMEDIAN) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iMEDIAN)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iMEDIAN)
       this%tTableData(iCount)%sDescription = "Median of values:"
       this%tTableData(iCount)%sKeyword = "MEDIAN"
     endif
 
     if(rValue(iMINMEAN) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iMINMEAN)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iMINMEAN)
       this%tTableData(iCount)%sDescription = &
          "Minimum "//trim(asChar(iPERIOD))//"-day mean value:"
       this%tTableData(iCount)%sKeyword = "MINMEAN"
@@ -664,7 +723,7 @@ contains
 
     if(rValue(iMAXMEAN) > rNEAR_TINY) then
       iCount = iCount + 1
-      write(this%tTableData(iCount)%sValue, fmt="(g14.8)") rValue(iMAXMEAN)
+      write(this%tTableData(iCount)%sValue(1), fmt="(g14.8)") rValue(iMAXMEAN)
       this%tTableData(iCount)%sDescription = &
          "Maximum "//trim(asChar(iPERIOD))//"-day mean value:"
       this%tTableData(iCount)%sKeyword = "MAXMEAN"
@@ -683,7 +742,8 @@ contains
     ! [ LOCALS ]
     integer (kind=T_INT) :: i, j, iCount, iStat
     character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME, &
-       pNEW_V_TABLE_NAME, pDATE_FILE, pFLOW_TIME_UNITS, pFACTOR
+       pNEW_V_TABLE_NAME, pDATE_FILE, pFLOW_TIME_UNITS, pFACTOR, &
+       pMONTHLY_VOLUMES
     real (kind=T_DBL) :: rVolume
     real (kind=T_SGL) :: rConversionFactor, rFlowTimeFactor, rFactor
     character (len=256) :: sBuf
@@ -699,7 +759,7 @@ contains
     call tMINDATE%parseDate("01/01/3000")
     call tMINDATE%parseTime("00:00:00")
     call tMINDATE%calcJulianDay()
-    call tMAXDATE%parseDate("01/01/0001")
+    call tMAXDATE%parseDate("01/01/0100")
     call tMAXDATE%parseTime("00:00:00")
     call tMAXDATE%calcJulianDay()
 
@@ -719,13 +779,19 @@ contains
       if(.not. str_compare(pNEW_V_TABLE_NAME(1), "NA")) then
         sNewVTableName = trim(pNEW_V_TABLE_NAME(1))
       else
-        sNewVTableName = pTS%sSeriesName//"_VTBL"
+        sNewVTableName = trim(pTS%sSeriesName)//"_VTBL"
       endif
 
       pDATE_FILE => pBlock%getString("DATE_FILE")
       if(.not. str_compare(pDATE_FILE(1), "NA")) then
         deallocate(pDR)
         pDR => read_dates_file(pDATE_FILE(1))
+      endif
+
+      pMONTHLY_VOLUMES => pBlock%getString("MONTHLY_VOLUMES")
+      if(.not. str_compare(pMONTHLY_VOLUMES(1), "NA")) then
+        deallocate(pDR)
+        pDR => make_monthly_dates_list_fn(pTS%tStartDate, pTS%tEndDate)
       endif
 
       pFLOW_TIME_UNITS => pBlock%getString("FLOW_TIME_UNITS")
@@ -783,7 +849,7 @@ contains
       sBuf = "From "//trim(pDR(i)%tStartDate%listdatetime() )//" to " &
               //trim(pDR(i)%tEndDate%listdatetime() )//"  volume = "
       tTableData(i)%sDescription = trim(sBuf)
-      tTableData(i)%sValue = asChar(rVolume)
+      tTableData(i)%sValue(1) = asChar(rVolume)
       call echolog( trim(sBuf)//asChar(rVolume,16,8)  )
     enddo
 
@@ -830,32 +896,95 @@ end subroutine table_calc_v_table
     if( this%iTableType == iSTABLE ) then
       do i=1,size(this%tTableData)
          write(LU,fmt="(t4,a48,t55,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
-            trim(this%tTableData(i)%sValue)
+            trim(this%tTableData(i)%sValue(1))
       enddo
 
     elseif( this%iTableType == iETABLE ) then
       write(LU,fmt= "(a)") trim(this%sHeader)
       do i=1,size(this%tTableData)
-         write(LU,fmt="(t4,a,3x,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
-            trim(this%tTableData(i)%sValue)
+         write(LU,fmt="(1x,a,t18,a,t38,a,t58,a)") trim(this%tTableData(i)%sDescription), &
+            trim(this%tTableData(i)%sValue(1)),trim(this%tTableData(i)%sValue(2)), &
+            trim(this%tTableData(i)%sValue(3))
       enddo
 
     elseif( this%iTableType == iVTABLE ) then
       write(LU,fmt= "(a)") trim(this%sHeader)
       do i=1,size(this%tTableData)
          write(LU,fmt="(t4,a58,t63,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
-            trim(this%tTableData(i)%sValue)
+            trim(this%tTableData(i)%sValue(1))
       enddo
 
     elseif( this%iTableType == iITABLE ) then
       write(LU,fmt= "(a)") trim(this%sHeader)
       do i=1,size(this%tTableData)
-         write(LU,fmt="(t4,a40,':',3x,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
-            trim(this%tTableData(i)%sValue)
+         write(LU,fmt="(1x,a70,t74,a)") adjustl(trim(this%tTableData(i)%sDescription)), &
+            trim(this%tTableData(i)%sValue(1))
       enddo
 
     endif
 
   end subroutine table_list_output_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine table_list_output_instructions_sub(this, iLU)
+
+    class(T_TABLE) :: this
+    integer (kind=T_INT), intent(in), optional :: iLU
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: i, j
+    integer (kind=T_INT) :: LU
+    integer (kind=T_INT) :: iInitialCharacter
+
+    if(present(iLU)) then
+      LU = iLU
+    else
+      LU = LU_STD_OUT
+    endif
+
+    ! write the instruction to move the file marker up to the beginning
+    ! of the next time series
+
+    if( this%iTableType == iSTABLE ) then
+      iInitialCharacter = 53
+      write(LU,fmt="('$S_TABLE$')" )
+      write(LU,fmt="(a)") "l8"
+      j = 0
+      do i=9,size(this%tTableData)
+        j = j + 1
+        write(LU,fmt="(a)") "l1 ["//trim(this%sSeriesName)//"_"//trim(asChar(j) )//"]" &
+          //trim(asChar(iInitialCharacter) )//":"//trim(asChar(iInitialCharacter + 20) )
+      enddo
+
+    elseif( this%iTableType == iETABLE ) then
+      iInitialCharacter = 60
+      write(LU,fmt="('$E_TABLE$')" )
+      write(LU,fmt="(a)") "l1"
+      do i=1,size(this%tTableData)
+        write(LU,fmt="(a)") "l1 ["//trim(this%sSeriesName)//"_"//trim(asChar(i) )//"]" &
+          //trim(asChar(iInitialCharacter) )//":"//trim(asChar(iInitialCharacter + 20) )
+      enddo
+
+    elseif( this%iTableType == iVTABLE ) then
+      iInitialCharacter = 63
+      write(LU,fmt="('$V_TABLE$')" )
+      write(LU,fmt="(a)") "l1"
+      do i=1,size(this%tTableData)
+        write(LU,fmt="(a)") "l1 ["//trim(this%sSeriesName)//"_"//trim(asChar(i) )//"]" &
+          //trim(asChar(iInitialCharacter) )//":"//trim(asChar(iInitialCharacter + 20) )
+      enddo
+
+    elseif( this%iTableType == iITABLE ) then
+      iInitialCharacter = 74
+      write(LU,fmt="('$I_TABLE$')" )
+      do i=1,size(this%tTableData)
+        write(LU,fmt="(a)") "l1 ["//trim(this%sSeriesName)//"_"//trim(asChar(i) )//"]" &
+          //trim(asChar(iInitialCharacter) )//":"//trim(asChar(iInitialCharacter + 20) )
+      enddo
+
+    endif
+
+  end subroutine table_list_output_instructions_sub
 
 end module tsp_table_manager

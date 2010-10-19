@@ -20,12 +20,11 @@ module tsp_main_loop
   type (T_BLOCK), pointer :: pBlock
 
   !f2py intent(hide) :: pArgs
-  !f2py intent(hide) :: pGage
   !f2py intent(hide) :: tTS
   !f2py intent(hide) :: TS
   character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
-  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
-  type (T_TIME_SERIES) :: tTS
+
+  type (T_TIME_SERIES), target :: tTS
   type (TIME_SERIES_COLLECTION) :: TS
 
   !f2py intent(hide) :: tStartDate
@@ -125,14 +124,14 @@ subroutine listseriesnames(sSeriesnames)
 
   sSeriesnames = ""
 
-  if(allocated(TS%tTS)) then
+  if(associated(TS%pTS)) then
 
-    iCount = size(TS%tTS)
+    iCount = size(TS%pTS)
 
     write(sFormatString, fmt="('(',i4,'(a,1x))')") iCount
 
     write(sSeriesnames, fmt=trim(adjustl(sFormatString))) &
-          (trim(TS%tTS(i)%sSeriesname),i=1,iCount)
+          (trim(TS%pTS(i)%sSeriesname),i=1,iCount)
 
   else
 
@@ -253,10 +252,12 @@ end subroutine listtablenames
     real (kind=T_SGL), dimension(n), intent(in) :: rValue
     integer (kind=T_INT), intent(in) :: n
 
-    call tTS%new(sSeriesName, sDescription, &
+    type (T_TIME_SERIES), pointer :: pNewSeries => null()
+
+    call pNewSeries%new(sSeriesName, sDescription, &
     iMonth, iDay, iYear, iHour, iMinute, iSecond, rValue)
 
-    call TS%add(tTS)
+    call TS%add(pNewSeries)
 
   end subroutine newseries
 
@@ -271,12 +272,12 @@ end subroutine listtablenames
     character(len=*), intent(in) :: sSeriesName
 
     ! [ LOCALS ]
-    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TIME_SERIES), pointer :: pTempSeries
     integer (kind=T_INT) :: n
 
-    pTS =>TS%getTS(sSeriesName)
+    pTempSeries =>TS%getTS(sSeriesName)
 
-    n = size(pTS%tData)
+    n = size(pTempSeries%tData)
     if(allocated(iJulianDay)) deallocate(iJulianDay)
     if(allocated(rFractionOfDay)) deallocate(rFractionOfDay)
     if(allocated(iMonth)) deallocate(iMonth)
@@ -291,17 +292,17 @@ end subroutine listtablenames
     allocate(iYear(n)); allocate(iHour(n)); allocate(iMinute(n))
     allocate(iSecond(n)); allocate(rValue(n)); allocate(rFractionOfDay(n))
 
-    iJulianDay = pTS%tData%tDT%iJulianDay
-    iMonth = pTS%tData%tDT%iMonth
-    iDay = pTS%tData%tDT%iDay
-    iYear = pTS%tData%tDT%iYear
-    iHour = pTS%tData%tDT%iHour
-    iMinute = pTS%tData%tDT%iMinute
-    iSecond = pTS%tData%tDT%iSecond
-    rFractionOfDay = pTS%tData%tDT%rFractionOfDay
-    rValue = pTS%tData%rValue
+    iJulianDay = pTempSeries%tData%tDT%iJulianDay
+    iMonth = pTempSeries%tData%tDT%iMonth
+    iDay = pTempSeries%tData%tDT%iDay
+    iYear = pTempSeries%tData%tDT%iYear
+    iHour = pTempSeries%tData%tDT%iHour
+    iMinute = pTempSeries%tData%tDT%iMinute
+    iSecond = pTempSeries%tData%tDT%iSecond
+    rFractionOfDay = pTempSeries%tData%tDT%rFractionOfDay
+    rValue = pTempSeries%tData%rValue
 
-    nullify(pTS)
+    nullify(pTempSeries)
 
   end subroutine getseries
 
@@ -442,16 +443,16 @@ end subroutine listtablenames
     !f2py character(len=*), intent(in), optional :: sSeriesName
     !f2py character(len=*), intent(in), optional :: sTimeBaseSeriesName
     !f2py character(len=*), intent(in), optional :: sNewSeriesName
-    character(len=*), intent(inout), optional :: sSeriesName
-    character(len=*), intent(inout), optional :: sTimeBaseSeriesName
-    character(len=*), intent(inout), optional :: sNewSeriesName
+    character(len=*), intent(in), optional :: sSeriesName
+    character(len=*), intent(in), optional :: sTimeBaseSeriesName
+    character(len=*), intent(in), optional :: sNewSeriesName
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: iLen1, iLen2, iLen3
     integer (kind=T_INT) :: i, j, iCount
     character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME, &
        pNEW_SERIES_NAME, pTB_SERIES_NAME
-    character (len=256) :: sNewName
+    character (len=256) :: sNewName, sName, sTBName
 
     iLen1 = 0; iLen2 = 0; iLen3 = 0
 
@@ -470,19 +471,34 @@ end subroutine listtablenames
         sNewName = trim(adjustl(sSeriesName))//"_TB"
       endif
 
+      sName = trim(sSeriesName)
+      sTBName = trim(sTimeBaseSeriesName)
+
     else  ! assume all arguments come via a block; parse block data and proceed
 
-      pSERIES_NAME = pBlock%getString("SERIES_NAME")
-      pTB_SERIES_NAME = pBlock%getString("TB_SERIES_NAME")
-      pNEW_SERIES_NAME = pBlock%getString("NEW_SERIES_NAME")
+      pSERIES_NAME => pBlock%getString("SERIES_NAME")
+      if(str_compare(pSERIES_NAME(1),"NA")) &
+        call Assert(lFALSE, "Must supply a SERIES_NAME in a NEW_TIME_BASE block")
 
-      sSeriesName = trim(pSERIES_NAME(1))
-      sNewSeriesName = trim(pNEW_SERIES_NAME(1))
-      sTimeBaseSeriesName = trim(pTB_SERIES_NAME(1))
+      pTB_SERIES_NAME => pBlock%getString("TB_SERIES_NAME")
+      if(str_compare(pTB_SERIES_NAME(1),"NA")) &
+        call Assert(lFALSE, "Must supply a TB_SERIES_NAME in a NEW_TIME_BASE block")
+
+      pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+      if(str_compare(pNEW_SERIES_NAME(1),"NA")) &
+        call Assert(lFALSE, "Must supply a TB_SERIES_NAME in a NEW_TIME_BASE block")
+
+      sName = trim(pSERIES_NAME(1))
+      sNewName = trim(pNEW_SERIES_NAME(1))
+      sTBName = trim(pTB_SERIES_NAME(1))
 
     endif
 
-    call TS%newTimeBase(sSeriesname, sTimeBaseSeriesName, sNewName)
+    call TS%newTimeBase(sName, sTBName, sNewName)
+
+    if(associated(pSERIES_NAME) ) deallocate(pSERIES_NAME)
+    if(associated(pNEW_SERIES_NAME) ) deallocate(pNEW_SERIES_NAME)
+    if(associated(pTB_SERIES_NAME) ) deallocate(pTB_SERIES_NAME)
 
   end subroutine new_time_base
 
@@ -521,7 +537,7 @@ end subroutine listtablenames
     character(len=*), intent(in), optional :: sSeriesName
 
     ! [ LOCALS ]
-    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TIME_SERIES), pointer :: pTempSeries
     type (T_TABLE) :: tTable
     integer (kind=T_INT) :: n
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
@@ -529,17 +545,17 @@ end subroutine listtablenames
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
-      pTS =>TS%getTS(sSeriesName)
+      pTempSeries =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_i_table(pTS)
+      call tTable%calc_i_table(pTempSeries)
 
     elseif(str_compare(pBlock%sBlockName, "HYDROLOGIC_INDICES")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
-      pTS => TS%getTS( sTempSeriesname )
-      call tTable%calc_i_table(pTS, pBlock)
+      pTempSeries => TS%getTS( sTempSeriesname )
+      call tTable%calc_i_table(pTempSeries, pBlock)
 
     else
 
@@ -549,9 +565,49 @@ end subroutine listtablenames
     endif
 
     call TS%add(tTable)
-    nullify(pTS)
+    nullify(pTempSeries)
 
   end subroutine hydrologic_indices
+
+!------------------------------------------------------------------------------
+
+  subroutine hydro_events(sSeriesname)
+
+    !f2py character*(*), intent(in), optional :: sSeriesName
+    character(len=*), intent(in), optional :: sSeriesName
+
+    ! [ LOCALS ]
+    type (T_TIME_SERIES), pointer :: pTempSeries
+    type (T_TIME_SERIES), pointer :: pNewSeries
+    integer (kind=T_INT) :: n
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+    character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
+
+      pTempSeries =>TS%getTS(sSeriesName)
+      ! don't pass along the block object; use defaults
+      pNewSeries => pTempSeries%findHydroEvents()
+
+    elseif(str_compare(pBlock%sBlockName, "HYDRO_PEAKS")) then
+
+      pArgs =>pBlock%getString("SERIES_NAME")
+      sTempSeriesname = pArgs(1)
+      pTempSeries => TS%getTS( sTempSeriesname )
+      pNewSeries => pTempSeries%findHydroEvents(pBlock)
+
+    else
+
+      call Assert(lFALSE, "Unhandled case in routine hydro_peaks", &
+        trim(__FILE__), __LINE__)
+
+    endif
+
+    call TS%add(pNewSeries)
+    nullify(pTempSeries)
+    nullify(pNewSeries)
+
+  end subroutine hydro_events
 
 !------------------------------------------------------------------------------
 
@@ -561,7 +617,7 @@ end subroutine listtablenames
     character(len=*), intent(in), optional :: sSeriesName
 
     ! [ LOCALS ]
-    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TIME_SERIES), pointer :: pTempSeries
     type (T_TABLE) :: tTable
     integer (kind=T_INT) :: n
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
@@ -569,17 +625,17 @@ end subroutine listtablenames
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
-      pTS =>TS%getTS(sSeriesName)
+      pTempSeries =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_e_table(pTS)
+      call tTable%calc_e_table(pTempSeries)
 
     elseif(str_compare(pBlock%sBlockName, "EXCEEDENCE_TIME")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
-      pTS => TS%getTS( sTempSeriesname )
-      call tTable%calc_e_table(pTS, pBlock)
+      pTempSeries => TS%getTS( sTempSeriesname )
+      call tTable%calc_e_table(pTempSeries, pBlock)
 
     else
 
@@ -589,7 +645,7 @@ end subroutine listtablenames
     endif
 
     call TS%add(tTable)
-    nullify(pTS)
+    nullify(pTempSeries)
 
   end subroutine exceedence_time
 
@@ -600,7 +656,7 @@ end subroutine listtablenames
     character(len=*), intent(in), optional :: sSeriesName
 
     ! [ LOCALS ]
-    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TIME_SERIES), pointer :: pTempSeries
     type (T_TABLE) :: tTable
     integer (kind=T_INT) :: n
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
@@ -608,17 +664,17 @@ end subroutine listtablenames
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
-      pTS =>TS%getTS(sSeriesName)
+      pTempSeries =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_s_table(pTS)
+      call tTable%calc_s_table(pTempSeries)
 
     elseif(str_compare(pBlock%sBlockName, "SERIES_STATISTICS")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
-      pTS => TS%getTS( sTempSeriesname )
-      call tTable%calc_s_table(pTS, pBlock)
+      pTempSeries => TS%getTS( sTempSeriesname )
+      call tTable%calc_s_table(pTempSeries, pBlock)
 
     else
 
@@ -628,7 +684,7 @@ end subroutine listtablenames
     endif
 
     call TS%add(tTable)
-    nullify(pTS)
+    nullify(pTempSeries)
 
   end subroutine series_statistics
 
@@ -647,13 +703,13 @@ subroutine reduce_time_span(sSeriesname, sStartdate, sEnddate)
   integer (kind=T_INT) :: iLen1, iLen2, iLen3
   integer (kind=T_INT) :: i, j, iCount
   character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME, &
-     pNEW_SERIES_NAME
+     pNEW_SERIES_NAME, pDATE_1
 
   character (len=256) :: sRecord, sItem
 
   type (T_DATETIME) :: tDATETIME_1, tDATETIME_2
-  type (T_TIME_SERIES) :: tNewSeries
-  type (T_TIME_SERIES), pointer :: pTS
+  type (T_TIME_SERIES), pointer :: pNewSeries
+  type (T_TIME_SERIES), pointer :: pTempSeries
 
   iLen1 = 0; iLen2 = 0; iLen3 = 0
 
@@ -687,50 +743,58 @@ subroutine reduce_time_span(sSeriesname, sStartdate, sEnddate)
       call tDATETIME_2%calcJulianDay()
 
       if(tDATETIME_2 <= tDATETIME_1) then
-        call warn(lFALSE, &
+        call Assert(lFALSE, &
           "DATE_2 and TIME_2 ("//trim(tDATETIME_2%listdatetime() )//") must be greater" &
           //" than DATE_1 and TIME_1 ("//trim(tDATETIME_1%listdatetime() )//")", trim(__FILE__),__LINE__)
         exit
       endif
 
-      tNewSeries%sSeriesName = trim(sSeriesName)//"_RDC"
+      pNewSeries%sSeriesName = trim(sSeriesName)//"_RDC"
 
     elseif(str_compare(pBlock%sBlockName, "REDUCE_TIME_SPAN")) then
+
+      pDATE_1 => pBlock%getString("DATE_1")
+      if(str_compare(pDATE_1(1),"NA")) then
+        call warn(lFALSE, "Must supply values for DATE_1, and DATE_2")
+        exit
+      endif
 
       ! get DATE_1, TIME_1, DATE_2, TIME_2 if supplied
       call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
       pNEW_SERIES_NAME = pBlock%getString("NEW_SERIES_NAME")
       if(str_compare(pNEW_SERIES_NAME(1),"NA")) then
-        tNewSeries%sSeriesName = trim(sSeriesName)//"_RDC"
+        pNewSeries%sSeriesName = trim(sSeriesName)//"_RDC"
       else
-        tNewSeries%sSeriesName = trim(pNEW_SERIES_NAME(1))
+        pNewSeries%sSeriesName = trim(pNEW_SERIES_NAME(1))
       endif
 
     else
-      call warn(lFALSE, "Must supply series name, startdate, and enddate (as strings)" &
-         //" OR call this routine with no arguments at all")
+      call warn(lFALSE, "Must supply values for SERIES_NAME, DATE_1, DATE_2")
       exit
     endif
 
     ! get pointer to series of interest; restrict to specified date
-    pTS => TS%getTS( sSeriesName )
-    iCount = pTS%selectByDate( tDATETIME_1, tDATETIME_2)
-    allocate(tNewSeries%tData(iCount))
+    pTempSeries => TS%getTS( sSeriesName )
+    iCount = pTempSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+    allocate(pNewSeries%tData(iCount))
 
     ! transfer selected data over to new series
     j=0
-    do i=1,size(pTS%tData)
-      if(pTS%tData(i)%lSelect) then
+    do i=1,size(pTempSeries%tData)
+      if(pTempSeries%tData(i)%lSelect) then
         j = j + 1
-        tNewSeries%tData(j) = pTS%tData(i)
+        pNewSeries%tData(j) = pTempSeries%tData(i)
       endif
     enddo
 
     ! add new series to TS collection
-    call TS%add(tNewSeries)
+    call TS%add(pNewSeries)
 
     exit
   enddo
+
+  nullify(pNewSeries)
+  nullify(pTempSeries)
 
 end subroutine reduce_time_span
 
@@ -769,9 +833,9 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
   character (len=256) :: sRecord, sItem
 
   type (T_DATETIME) :: tDATETIME_1, tDATETIME_2
-  type (T_TIME_SERIES) :: tNewSeries_BF
-  type (T_TIME_SERIES) :: tNewSeries_SF
-  type (T_TIME_SERIES), pointer :: pTS
+  type (T_TIME_SERIES), pointer :: pNewSeries_BF
+  type (T_TIME_SERIES), pointer :: pNewSeries_SF
+  type (T_TIME_SERIES), pointer :: pTempSeries
 
   iLen1 = 0; iLen2 = 0; iLen3 = 0; iLen4 = 0; iLen5 = 0
   iHYSEP_TYPE = iFIXED_INTERVAL
@@ -847,24 +911,25 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
         exit
       endif
 
-      tNewSeries_BF%sSeriesName = trim(sSeriesName)//"_BF"
-      tNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
+      pNewSeries_BF%sSeriesName = trim(sSeriesName)//"_BF"
+      pNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
 
     elseif(str_compare(pBlock%sBlockName, "USGS_HYSEP")) then
 
       ! get DATE_1, TIME_1, DATE_2, TIME_2 if supplied
       call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
-      pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
-      if(str_compare(pNEW_SERIES_NAME(1),"NA")) then
-        tNewSeries_BF%sSeriesName = trim(sSeriesName)//"_BF"
-        tNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
-      else
-        tNewSeries_BF%sSeriesName = trim(pNEW_SERIES_NAME(1))
-        tNewSeries_SF%sSeriesName = trim(pNEW_SERIES_NAME(1))//"_SF"
-      endif
 
       pSERIES_NAME => pBlock%getString("SERIES_NAME")
       sSeriesName = trim(pSERIES_NAME(1) )
+
+      pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+      if(str_compare(pNEW_SERIES_NAME(1),"NA")) then
+        pNewSeries_BF%sSeriesName = trim(sSeriesName)//"_BF"
+        pNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
+      else
+        pNewSeries_BF%sSeriesName = trim(pNEW_SERIES_NAME(1))
+        pNewSeries_SF%sSeriesName = trim(pNEW_SERIES_NAME(1))//"_SF"
+      endif
 
       ! get the values
       pHYSEP_TYPE => pBlock%getString("HYSEP_TYPE")
@@ -907,13 +972,13 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     endif
 
     ! get pointer to series of interest; restrict to specified date
-    pTS => TS%getTS( sSeriesName )
-    iCount = pTS%selectByDate( tDATETIME_1, tDATETIME_2)
-    allocate(tNewSeries_BF%tData(iCount))
-    allocate(tNewSeries_SF%tData(iCount))
+    pTempSeries => TS%getTS( sSeriesName )
+    iCount = pTempSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+    allocate(pNewSeries_BF%tData(iCount))
+    allocate(pNewSeries_SF%tData(iCount))
 
-    tNewSeries_BF%tData = pack(pTS%tData, pTS%tData%lSelect)
-    tNewSeries_SF%tData = pack(pTS%tData, pTS%tData%lSelect)
+    pNewSeries_BF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
+    pNewSeries_SF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
 
     if(iInterval < 3 .or. iInterval > 11 .or. mod(iInterval,2) /=1) then
       call warn(lFALSE,"Interval must be in the set [3,5,7,9,11]. You entered " &
@@ -924,16 +989,16 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     ! make call to appropriate baseflow calculation routine
     select case ( iHYSEP_TYPE )
       case(iFIXED_INTERVAL)
-        call fixed(iCount,pack(pTS%tData%rValue, pTS%tData%lSelect), &
-                  iInterval,1,0,tNewSeries_BF%tData%rValue)
+        call fixed(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lSelect), &
+                  iInterval,1,0,pNewSeries_BF%tData%rValue)
 
       case(iSLIDING_INTERVAL)
-        call slide(iCount,pack(pTS%tData%rValue, pTS%tData%lSelect), &
-                  iInterval,tNewSeries_BF%tData%rValue)
+        call slide(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lSelect), &
+                  iInterval,pNewSeries_BF%tData%rValue)
 
       case(iLOCAL_MINIMUM)
-        call locmin(iCount,pack(pTS%tData%rValue, pTS%tData%lSelect), &
-                  iInterval,tNewSeries_BF%tData%rValue)
+        call locmin(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lSelect), &
+                  iInterval,pNewSeries_BF%tData%rValue)
 
       case default
         call Assert(lFALSE, "Internal logic error - failed to match appropriate" &
@@ -941,17 +1006,24 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
 
     end select
 
-    ! at this point, tNewSeries_SF%tData%rValue holds the total mean daily streamflow
-    tNewSeries_SF%tData%rValue = tNewSeries_SF%tData%rValue - tNewSeries_BF%tData%rValue
+    ! at this point, pNewSeries_SF%tData%rValue holds the total mean daily streamflow
+    pNewSeries_SF%tData%rValue = pNewSeries_SF%tData%rValue - pNewSeries_BF%tData%rValue
+
+
+    ! ensure that new series have the date range populated
+    call pNewSeries_BF%findDateMinAndMax()
+    call pNewSeries_SF%findDateMinAndMax()
 
     ! add new series to TS collection
-    call TS%add(tNewSeries_BF)
-    call TS%add(tNewSeries_SF)
+    call TS%add(pNewSeries_BF)
+    call TS%add(pNewSeries_SF)
 
     exit
   enddo
 
-  nullify(pTS)
+  nullify(pTempSeries)
+  nullify(pNewSeries_SF)
+  nullify(pNewSeries_BF)
   if(associated(pDRAINAGE_AREA) ) deallocate(pDRAINAGE_AREA)
   if(associated(pTIME_INTERVAL) ) deallocate(pTIME_INTERVAL)
   if(associated(pHYSEP_TYPE) ) deallocate(pHYSEP_TYPE)
@@ -972,7 +1044,11 @@ end subroutine usgs_hysep
 
   subroutine addseries()
 
-    call TS%add(tTS)
+    type (T_TIME_SERIES), pointer :: pNewSeries
+
+    allocate(pNewSeries%tData(size(tTS%tData)) )
+    pNewSeries => tTS
+    call TS%add(pNewSeries)
 
   end subroutine addseries
 
@@ -983,12 +1059,12 @@ end subroutine usgs_hysep
     character(len=*) :: sSeriesname
 
     ! [ LOCALS ]
-    type (T_TIME_SERIES), pointer :: pTS
-    pTS => TS%getTS( sSeriesName )
+    type (T_TIME_SERIES), pointer :: pTempSeries => null()
+    pTempSeries => TS%getTS( sSeriesName )
 
-    pDateRange => pTS%findDataGaps()
+    pDateRange => pTempSeries%findDataGaps()
 
-    deallocate(pTS)
+    nullify(pTempSeries)
 
   end subroutine findgaps
 
@@ -1047,9 +1123,17 @@ end subroutine usgs_hysep
 
       call hydrologic_indices()
 
+    elseif(str_compare(pBlock%sBlockname,"HYDRO_EVENTS")) then
+
+      call hydro_events()
+
     elseif(str_compare(pBlock%sBlockname,"EXCEEDENCE_TIME")) then
 
       call exceedence_time()
+
+    elseif(str_compare(pBlock%sBlockname,"ERASE_ENTITY")) then
+
+      call erase_entity()
 
     elseif(str_compare(pBlock%sBlockname, "REDUCE_TIME_SPAN")) then
 
@@ -1070,6 +1154,10 @@ end subroutine usgs_hysep
     elseif(str_compare(pBlock%sBlockname, "VOLUME_CALCULATION")) then
 
       call volume_calculation()
+
+    elseif(str_compare(pBlock%sBlockname, "WRITE_PEST_FILES")) then
+
+      call write_pest_files()
 
     elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_NWIS")) then
 
@@ -1115,8 +1203,8 @@ subroutine series_difference(sSeriesname, sNewSeriesName)
 
   character (len=256) :: sNewName
 
-  type (T_TIME_SERIES) :: tNewSeries
-  type (T_TIME_SERIES), pointer :: pTS
+  type (T_TIME_SERIES), pointer :: pNewSeries
+  type (T_TIME_SERIES), pointer :: pTempSeries
 
   iLen1 = 0; iLen2 = 0
 
@@ -1125,7 +1213,7 @@ subroutine series_difference(sSeriesname, sNewSeriesName)
 
   if(iLen1 > 0) then   ! ignore block; perform operations on sSeriesname
 
-    pTS => TS%getTS(sSeriesName)
+    pTempSeries => TS%getTS(sSeriesName)
 
     if(iLen2 > 0) then
       sNewName = trim(sNewSeriesName)
@@ -1137,7 +1225,7 @@ subroutine series_difference(sSeriesname, sNewSeriesName)
 
     pSERIES_NAME => pBlock%getString("SERIES_NAME")
     pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
-    pTS => TS%getTS(pSERIES_NAME(1))
+    pTempSeries => TS%getTS(pSERIES_NAME(1))
 
     sNewName = trim(pNEW_SERIES_NAME(1))
 
@@ -1151,20 +1239,20 @@ subroutine series_difference(sSeriesname, sNewSeriesName)
 
   endif
 
-  iCount = size(pTS%tData)
+  iCount = size(pTempSeries%tData)
 
-  allocate(tNewSeries%tData(iCount - 1), stat = iStat)
+  allocate(pNewSeries%tData(iCount - 1), stat = iStat)
   call Assert(iStat == 0, "Problem allocating memory for time series", &
     trim(__FILE__), __LINE__)
 
-  tNewSeries%sSeriesname = trim(sNewName)
-  tNewSeries%tData = pTS%tData(2:iCount)
+  pNewSeries%sSeriesname = trim(sNewName)
+  pNewSeries%tData = pTempSeries%tData(2:iCount)
 
   do i=2,iCount
-    tNewSeries%tData(i-1)%rValue = pTS%tData(i)%rValue - pTS%tData(i-1)%rValue
+    pNewSeries%tData(i-1)%rValue = pTempSeries%tData(i)%rValue - pTempSeries%tData(i-1)%rValue
   enddo
 
-  call TS%add(tNewSeries)
+  call TS%add(pNewSeries)
 
 end subroutine series_difference
 
@@ -1259,6 +1347,51 @@ end subroutine datestampsequal
     nullify(pTS)
 
   end subroutine volume_calculation
+
+!------------------------------------------------------------------------------
+
+  subroutine erase_entity(sSeriesname)
+
+    character(len=*), intent(in), optional :: sSeriesName
+
+    ! [ LOCALS ]
+    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TABLE), pointer :: pTable
+    integer (kind=T_INT) :: n
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+    character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
+    ! don't pass along the block object; use sSeriesName
+
+      sTempSeriesname = trim(sSeriesName)
+
+    elseif(str_compare(pBlock%sBlockName, "ERASE_ENTITY")) then
+
+      pArgs =>pBlock%getString("SERIES_NAME")
+      sTempSeriesname = pArgs(1)
+
+      call Assert(.not. str_compare(sTempSeriesname, "NA"), &
+        "A series name must be provided in an ERASE_ENTITY block", &
+        trim(__FILE__), __LINE__)
+
+    else
+
+      call Assert(lFALSE, "Unhandled case in routine erase_entity", &
+        trim(__FILE__), __LINE__)
+
+    endif
+
+    pTS => TS%getTS(sTempSeriesName)
+    pTable => TS%getTable(sTempSeriesName)
+
+    if(associated(pTS) )  call TS%removeTS(sTempSeriesName)
+    if(associated(pTable) )  call TS%removeTable(sTempSeriesName)
+
+    nullify(pTS)
+    nullify(pTable)
+
+  end subroutine erase_entity
 
 !------------------------------------------------------------------------------
 
@@ -1445,7 +1578,8 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
   character (len=4096) :: sTimeSeriesList
 
   type (TIME_SERIES_COLLECTION), target :: TSCOL
-  type (T_TIME_SERIES), pointer :: pTS
+  type (T_TIME_SERIES), pointer :: pTempSeries
+  type (T_TIME_SERIES), pointer :: pNewSeries
   real (kind=T_SGL), dimension(:), allocatable :: rTempValue
   integer (kind=T_INT) :: iNumRecords
   integer (kind=T_INT) :: iNumSeries
@@ -1476,9 +1610,9 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
     call Chomp(sBuf, sVarTxt(i) , OPERATORS//" ")
     if(isElement(sVarTxt(i), sSeriesNamesTxt)) then
       iNumSeries = iNumSeries + 1
-      pTS => TS%getTS( sVarTxt(i) )
-      iNumRecords = size(pTS%tData)
-      call TSCOL%add( pTS )
+      pTempSeries => TS%getTS( sVarTxt(i) )
+      iNumRecords = size(pTempSeries%tData)
+      call TSCOL%add( pTempSeries )
       lInclude(i) = lTRUE
       if(iNumSeries>1) then
         call datestampsequal(sPreviousSeriesName, sVarTxt(i), lConsistentTimebase )
@@ -1513,18 +1647,18 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
       do i=1,iNumRecords
         do j=1,count(lInclude)
-          rTempValue(j) = TSCOL%tTS(j)%tData(i)%rValue
+          rTempValue(j) = TSCOL%pTS(j)%tData(i)%rValue
         enddo
 !      print *, '  IN:', rTempValue
-        rOut(i) = evaluate_expression (rTempValue , TSCOL%tTS(1)%tData(i)%tDT )
+        rOut(i) = evaluate_expression (rTempValue , TSCOL%pTS(1)%tData(i)%tDT )
 !      print *, '  OUT:', rOut(i)
       enddo
 
-      call tTS%new( sNameTxt, &
+      call pNewSeries%new( sNameTxt, &
         "Series calculated from the equation '"//trim(sFunctionText)//"'", &
-        TSCOL%tTS(1)%tData%tDT, rOut)
+        TSCOL%pTS(1)%tData%tDT, rOut)
 
-      call TS%add(tTS)
+      call TS%add(pNewSeries)
 
     else    ! inconsistent timebase or no time series provided
 
@@ -1542,6 +1676,8 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
   enddo
 
+  nullify(pNewSeries)
+  nullify(pTempSeries)
   deallocate(sVarTxt)
   call destroyfunc()
   call TSCOL%clear()
@@ -1627,6 +1763,7 @@ subroutine period_statistics()
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pBaseTS
     type (T_TIME_SERIES), pointer, dimension(:) :: pStatSeries
+    type (T_TIME_SERIES), pointer :: pTempStatSeries
     integer (kind=T_INT) :: i
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
     character (len=MAXARGLENGTH) :: sTempSeriesname
@@ -1649,11 +1786,13 @@ subroutine period_statistics()
 
     do i=1,size(pStatSeries)
 
-      call TS%add(pStatSeries(i))
+      pTempStatSeries => pStatSeries(i)
+      call TS%add(pTempStatSeries)
 
     enddo
 
     nullify(pBaseTS)
+    nullify(pTempStatSeries)
 
 end subroutine period_statistics
 
@@ -1713,5 +1852,66 @@ subroutine listblock()
   call pBlock%printDict()
 
 end subroutine listblock
+
+!------------------------------------------------------------------------------
+
+subroutine testmonthlydates(iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY)
+
+  !f2py integer, intent(in) :: iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY
+  integer (kind=T_INT), intent(in) :: iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY
+
+  ! [ LOCALS ]
+  type (T_DATETIME) :: tStartDate, tEndDate
+  integer (kind=T_INT) :: i
+  type (T_DATERANGE), dimension(:), pointer :: pDR
+
+  call tStartDate%calcJulianDay(iStartMM,iStartDD,iStartYYYY, 0, 0, 0)
+  call tEndDate%calcJulianDay(iEndMM,iEndDD,iEndYYYY, 23, 59, 59)
+
+  print *, "Start date: "//tStartDate%prettydate()
+  print *, "End date: "//tEndDate%prettydate()
+
+  pDR =>  make_monthly_dates_list_fn(tStartDate, tEndDate)
+
+  do i=1,size(pDR)
+
+    print *, trim(asChar(i) )//" "//pDR(i)%tStartDate%prettydate()//" to " &
+        //pDR(i)%tEndDate%prettydate()
+
+  enddo
+
+
+end subroutine testmonthlydates
+
+!------------------------------------------------------------------------------
+
+subroutine testannualdates(iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY)
+
+  !f2py integer, intent(in) :: iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY
+  integer (kind=T_INT), intent(in) :: iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY
+
+  ! [ LOCALS ]
+  type (T_DATETIME) :: tStartDate, tEndDate
+  integer (kind=T_INT) :: i
+  type (T_DATERANGE), dimension(:), pointer :: pDR
+
+  call tStartDate%calcJulianDay(iStartMM,iStartDD,iStartYYYY, 0, 0, 0)
+  call tEndDate%calcJulianDay(iEndMM,iEndDD,iEndYYYY, 23, 59, 59)
+
+  print *, "Start date: "//tStartDate%prettydate()
+  print *, "End date: "//tEndDate%prettydate()
+
+  pDR =>  make_annual_dates_list_fn(tStartDate, tEndDate)
+
+  do i=1,size(pDR)
+
+    print *, trim(asChar(i) )//" "//pDR(i)%tStartDate%prettydate()//" to " &
+        //pDR(i)%tEndDate%prettydate()
+
+  enddo
+
+
+end subroutine testannualdates
+
 
 end module tsp_main_loop

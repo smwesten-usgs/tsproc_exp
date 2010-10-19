@@ -63,6 +63,22 @@ end function str_compare
 
 !------------------------------------------------------------------------------
 
+function str_contains(sString, sSubString)                   result(lBool)
+
+  character(len=*), intent(in) :: sString
+  character(len=*), intent(in) :: sSubString
+  logical (kind=T_LOGICAL) :: lBool
+
+  if(index(trim(uppercase(sString)), trim(uppercase(sSubString))) > 0) then
+    lBool = lTRUE
+  else
+    lBool = lFALSE
+  end if
+
+end function str_contains
+
+!------------------------------------------------------------------------------
+
 function quote(sString)                                   result(sQuotedString)
 
   character (len=*), intent(in) :: sString
@@ -350,7 +366,7 @@ function real2char_wsf(rValue, iWidth, iSignificantFigures)  result(sBuf)
 
   write(UNIT=sBuf,FMT=sFormat) rValue
 
-  sBuf = adjustr(sBuf)
+  sBuf = ADJUSTR(sBuf)
 
 end function real2char_wsf
 
@@ -385,7 +401,7 @@ function dbl2char_wsf(rValue, iWidth, iSignificantFigures)  result(sBuf)
 
   write(UNIT=sBuf,FMT=sFormat) rValue
 
-  sBuf = adjustr(sBuf)
+  sBuf = ADJUSTR(sBuf)
 
 end function dbl2char_wsf
 
@@ -600,9 +616,10 @@ subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
   if ( .not. lCondition ) then
 
     if(lAssertAlwaysFatal) then
+      print *
       print *,'FATAL ERROR - HALTING TSPROC'
       print *,trim(sErrorMessage)
-      print *, " "
+      print *
       if(present(sFilename)) print *,"module: ", trim(sFilename)
       if(present(iLineNo)) print *,"line no.: ",iLineNo
     else
@@ -619,7 +636,7 @@ subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
       if(lFileOpen) then
 
         if(lAssertAlwaysFatal) then
-          write(UNIT=LU_REC,FMT="(a)") 'FATAL ERROR - HALTING TSPROC'
+          write(UNIT=LU_REC,FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
           write(UNIT=LU_REC,FMT="(a,/)") trim(sErrorMessage)
           if(present(sFilename)) write(UNIT=LU_REC,FMT=*) "module: ", &
              trim(sFilename)

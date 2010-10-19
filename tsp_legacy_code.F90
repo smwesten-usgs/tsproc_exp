@@ -28,7 +28,7 @@ subroutine set_global_variables(TS)
 
   type (TIME_SERIES_COLLECTION), intent(in) :: TS
 
-  MAXSERIES = size(TS%tTS)
+  MAXSERIES = size(TS%pTS)
   MAXTABLES = size(TS%tTable)
 
 end subroutine set_global_variables
@@ -38,6 +38,8 @@ end subroutine set_global_variables
 !     Last change:  J     9 Sep 2004   10:39 pm
 subroutine pest_files(pBlock, TS)
 
+  implicit none
+
   type (TIME_SERIES_COLLECTION), intent(inout) :: TS
   type (T_BLOCK), pointer, intent(in) :: pBlock
 
@@ -46,6 +48,9 @@ subroutine pest_files(pBlock, TS)
   character*25 Context_g
   character*40 CurrentBlock_g
   character*120 sInfile,sRecfile,sOutfile,sString
+  type (T_TIME_SERIES), pointer :: pTS_Observed
+  type (T_TIME_SERIES), pointer :: pTS_Modeled
+  type (T_TABLE), pointer :: pTable
 
 ! -- The following variables are global because they are used to exchange information
 !    between the LIST_OUTPUT block and the WRITE_PEST_FILES block.
@@ -56,27 +61,24 @@ subroutine pest_files(pBlock, TS)
   integer iMvtable_g
   integer iMdtable_g
 
-  integer, dimension (:), allocatable ::  iOutseries_g,iOutStable_g, &
-       iOutVtable_g, iOutDtable_g,iOutCtable_g
-
 !  integer iOutseries_g(MAXSERIES),iOutStable_g(MAXSTABLE),iOutVtable_g(MAXVTABLE), &
 !          iOutDtable_g(MAXDTABLE),iOutCtable_g(MAXCTABLE)
   character*10 sSeriesFormat_g
-  character*120 sListOutputFile_g
 
 ! -- General parameters
        logical lexist
-       integer ierr,icontext,itempfile,ioseries,iostable,iovtable,iodtable,i,iunit,j, &
-       jline,numtempfile,ii1,ll,jj1,jj,kk,io,im,noterm,nmterm,iomseries,iomstable,  &
-       iomvtable,iomdtable,iout,nsterm,iterm,il,siout,nobs,nobsgp,ieqnerr,nterm,nnterm, &
-       isnum,dd,nn,yy,mm,k,ixcon,auiyesno,itempunit,isvd,iaui,itemp,LU_PEST_CONTROL_FILE
+       integer (kind=T_INT) :: ierr,icontext,itempfile,ioseries,iostable, &
+         iovtable,iodtable,i,iunit,j, &
+         jline,numtempfile,ii1,ll,jj1,jj,kk,io,im,noterm,nmterm,iomseries,iomstable,  &
+         iomvtable,iomdtable,iout,nsterm,iterm,il,siout,nobs,nobsgp,ieqnerr,nterm,nnterm, &
+         isnum,dd,nn,yy,mm,k,ixcon,auiyesno,itempunit,isvd,iaui,itemp,LU_PEST_CONTROL_FILE
        real rotemp,rmtemp,rprecis,weightmin,weightmax,totim,rtime,eigthresh
        integer, dimension (:), allocatable :: obsseries,obsstable,obsvtable, &
-          obsdtable,modseries,modstable, &
-          modvtable,moddtable
+         obsdtable,modseries,modstable, &
+         modvtable,moddtable
        real, dimension(:), allocatable ::  sweightmin,sweightmax,stweightmin, &
-          stweightmax,vtweightmin,vtweightmax, &
-          dtweightmin,dtweightmax
+         stweightmax,vtweightmin,vtweightmax, &
+         dtweightmin,dtweightmax
        double precision dval,dtempx
        character*1 aa
        character*3 auiaa
@@ -84,7 +86,7 @@ subroutine pest_files(pBlock, TS)
        character*15 aline,avariable
        character*30 aoption,correct_keyword,last_keyword,atemp,otherblock,aname
        character*120 pardatfile,pestctlfile,instructfile,modcomline,bstring,cstring, &
-       micactlfile,pest2micacom
+         micactlfile,pest2micacom
        character*25 acontext(MAXCONTEXT)
        character*12, dimension(:), allocatable :: basename,sbasename, obgnme
        character*120, dimension(:), allocatable :: tempfile,modfile
@@ -117,6 +119,7 @@ subroutine pest_files(pBlock, TS)
 
        character (len=256) :: sRecord, sItem
        integer (kind=T_INT) :: iStat
+       integer (kind=T_INT) :: iNumSeries, iNumTables
 
     character (len=MAXARGLENGTH), dimension(:), pointer :: pTEMPLATE_FILE, &
       pMODEL_INPUT_FILE, pPARAMETER_DATA_FILE, pPARAMETER_GROUP_FILE, &
@@ -194,12 +197,12 @@ subroutine pest_files(pBlock, TS)
          pPEST2MICA_COMMAND => pBlock%getString("PEST2MICA_COMMAND")
          pNEW_INSTRUCTION_FILE => pBlock%getString("NEW_INSTRUCTION_FILE")
          pMODEL_COMMAND_LINE => pBlock%getString("MODEL_COMMAND_LINE")
-         pOBSERVATION_SERIES_NAME => pBlock%getString("OBSERVATION_SERIES_NAME")
-         pOBSERVATION_TABLE_NAME => pBlock%getString("OBSERVATION_TABLE_NAME")
-         pMODEL_SERIES_NAME => pBlock%getString("MODEL_SERIES_NAME")
-         pMODEL_TABLE_NAME => pBlock%getString("MODEL_TABLE_NAME")
-         pSERIES_WEIGHTS_EQUATION => pBlock%getString("SERIES_WEIGHTS_EQUATION")
-         pTABLE_WEIGHTS_EQUATION => pBlock%getString("TABLE_WEIGHTS_EQUATION")
+         pOBSERVATION_SERIES_NAME => pBlock%findString("OBSERVATION_SERIES_NAME")
+         pOBSERVATION_TABLE_NAME => pBlock%findString("OBSERVATION_TABLE_NAME")
+         pMODEL_SERIES_NAME => pBlock%findString("MODEL_SERIES_NAME")
+         pMODEL_TABLE_NAME => pBlock%findString("MODEL_TABLE_NAME")
+         pSERIES_WEIGHTS_EQUATION => pBlock%findString("SERIES_WEIGHTS_EQUATION")
+         pTABLE_WEIGHTS_EQUATION => pBlock%findString("TABLE_WEIGHTS_EQUATION")
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! -- Any absenses in the block are now looked for.
@@ -213,6 +216,20 @@ subroutine pest_files(pBlock, TS)
        call assert(.not. str_compare(pTEMPLATE_FILE(1),"NA"), &
             "At least one TEMPLATE_FILE keyword must be provided in WRITE_PEST_FILES block", &
             trim(__FILE__), __LINE__)
+       ! we must have at least one template file; OK to process
+       numtempfile = size(pTEMPLATE_FILE)
+       allocate(tempfile(numtempfile))
+       tempfile = pTEMPLATE_FILE
+
+       call assert(.not. str_compare(pMODEL_INPUT_FILE(1),"NA"), &
+            "At least one MODEL_INPUT_FILE keyword must be provided in WRITE_PEST_FILES block", &
+            trim(__FILE__), __LINE__)
+
+       call assert(numtempfile == size(pMODEL_INPUT_FILE), &
+            "A MODEL_INPUT_FILE argument must be supplied for each TEMPLATE_FILE entry", &
+            trim(__FILE__),__LINE__)
+       allocate(modfile(numtempfile))
+       modfile = pMODEL_INPUT_FILE
 
        call assert (size(pMODEL_SERIES_NAME) == size(pOBSERVATION_SERIES_NAME), &
            "You must provide a model series name for each observation series name", &
@@ -222,21 +239,61 @@ subroutine pest_files(pBlock, TS)
            "You must provide a weights equation for each model and observation series pair", &
            trim(__FILE__),__LINE__)
 
+       nobs = 0
        if( .not.  (str_compare(pOBSERVATION_SERIES_NAME(1),"NA")) ) then
          ! create comparison objects for time series
          do i=1,size(pMODEL_SERIES_NAME)
            call TS%tsCompare(pOBSERVATION_SERIES_NAME(i), pMODEL_SERIES_NAME(i), &
               pSERIES_WEIGHTS_EQUATION(i) )
+           nobs = nobs + size(TS%tTSComparison(i)%rWeightValue)
          enddo
        endif
 
        if( .not.  (str_compare(pOBSERVATION_TABLE_NAME(1),"NA")) ) then
          ! create comparison objects for tables
          do i=1,size(pMODEL_TABLE_NAME)
-           call TS%tsCompare(pOBSERVATION_TABLE_NAME(i), pMODEL_TABLE_NAME(i), &
+           call TS%tableCompare(pOBSERVATION_TABLE_NAME(i), pMODEL_TABLE_NAME(i), &
               pTABLE_WEIGHTS_EQUATION(i) )
+           nobs = nobs + size(TS%tTableComparison(i)%rWeightValue)
          enddo
        endif
+
+       if(str_compare(pOBSERVATION_TABLE_NAME(1),"NA")) then
+         iNumTables = 0
+       else
+         iNumTables = size(pOBSERVATION_TABLE_NAME)
+       endif
+
+       if(str_compare(pOBSERVATION_SERIES_NAME(1),"NA")) then
+         iNumSeries = 0
+       else
+         iNumSeries = size(pOBSERVATION_SERIES_NAME)
+       endif
+
+         ! can add more functionality later by allowing user-specified obs groups
+         ! to be entered and recorded
+!       if(str_compare(pOBSERVATION_GROUP_NAME(1),"NA"))then
+
+         nobsgp = iNumTables + iNumSeries
+         allocate(obgnme(nobsgp) )
+
+         j=0
+         do i=1,iNumSeries
+           j = j + 1
+           obgnme(j) = pOBSERVATION_SERIES_NAME(i)
+         enddo
+
+         do i=1,iNumTables
+           j = j + 1
+           obgnme(j) = pOBSERVATION_TABLE_NAME(i)
+         enddo
+
+!       else
+
+
+!       endif
+
+
 
 !        if(pestctlfile == ' ')then
 !          write(amessage,230) trim(CurrentBlock_g)
@@ -1377,106 +1434,112 @@ subroutine pest_files(pBlock, TS)
 ! !    read from the parameter data file, the parameter group file and the template files.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-!        allocate(partrans(npar),parchglim(npar),parval1(npar),parlbnd(npar),  &
-!                 parubnd(npar),pargp(npar),scale(npar),offset(npar), stat=ierr)
+        allocate(partrans(npar),parchglim(npar),parval1(npar),parlbnd(npar),  &
+                 parubnd(npar),pargp(npar),scale(npar),offset(npar), stat=ierr)
 !        if(ierr.ne.0) go to 9200
 !
-!        allocate(pargpnme(npar),inctyp(npar),derinc(npar),derinclb(npar),forcen(npar), &
-!        derincmul(npar),dermthd(npar), stat=ierr)
+        allocate(pargpnme(npar),inctyp(npar),derinc(npar),derinclb(npar),forcen(npar), &
+        derincmul(npar),dermthd(npar), stat=ierr)
 !        if(ierr.ne.0) go to 9200
 !
-!        do ipar=1,npar
-!          aapar=apar(ipar)
-!          if(f_numpar.ne.0)then
-!            do j=1,f_numpar
-!              if(aapar == f_parnme(j))then
-!                partrans(ipar)=f_partrans(j)
-!                parchglim(ipar)=f_parchglim(j)
-!                parval1(ipar)=f_parval1(j)
-!                parlbnd(ipar)=f_parlbnd(j)
-!                parubnd(ipar)=f_parubnd(j)
-!                pargp(ipar)=f_pargp(j)
-!                scale(ipar)=f_scale(j)
-!                offset(ipar)=f_offset(j)
-!                go to 1450
-!              end if
-!            end do
-!          end if
-!          partrans(ipar)='log'
-!          parchglim(ipar)='factor'
-!          parval1(ipar)=1.0
-!          parlbnd(ipar)=1.0e-10
-!          parubnd(ipar)=1e10
-!          pargp(ipar)=aapar
-!          scale(ipar)=1.0
-!          offset(ipar)=0.0
-! 1450     continue
-!        end do
+        do ipar=1,npar
+          aapar=apar(ipar)
+          if(f_numpar.ne.0)then
+            do j=1,f_numpar
+              if(aapar == f_parnme(j))then
+                partrans(ipar)=f_partrans(j)
+                parchglim(ipar)=f_parchglim(j)
+                parval1(ipar)=f_parval1(j)
+                parlbnd(ipar)=f_parlbnd(j)
+                parubnd(ipar)=f_parubnd(j)
+                pargp(ipar)=f_pargp(j)
+                scale(ipar)=f_scale(j)
+                offset(ipar)=f_offset(j)
+                go to 1450
+              end if
+            end do
+          end if
+          partrans(ipar)='log'
+          parchglim(ipar)='factor'
+          parval1(ipar)=1.0
+          parlbnd(ipar)=1.0e-10
+          parubnd(ipar)=1e10
+          pargp(ipar)=aapar
+          scale(ipar)=1.0
+          offset(ipar)=0.0
+ 1450     continue
+        end do
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! ! -- If any parameters are tied to a parameter which does not exist, this is now
 ! !    rectified.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-!        do ipar=1,npar
-!          if(partrans(ipar)(1:4) == 'tied') then
-!            aapar=partrans(ipar)(6:)
-!            do i=1,npar
-!              if(aapar == apar(i)) go to 1470
-!            end do
-!            partrans(ipar)='none'
-! 1470       continue
-!          end if
-!        end do
+        do ipar=1,npar
+          if(partrans(ipar)(1:4) == 'tied') then
+            aapar=partrans(ipar)(6:)
+            do i=1,npar
+              if(aapar == apar(i)) go to 1470
+            end do
+            partrans(ipar)='none'
+ 1470       continue
+          end if
+        end do
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! ! -- Parameter groups are now organised.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-!        npargp=0
-!        do ipar=1,npar
-!          apargp=pargp(ipar)
-!          if(apargp == 'none') then
-!            if((partrans(ipar).ne.'tied').and.(partrans(ipar).ne.'fixed'))then
+        npargp=0
+        do ipar=1,npar
+          apargp=pargp(ipar)
+          if(apargp == 'none') then
+            if((partrans(ipar).ne.'tied').and.(partrans(ipar).ne.'fixed'))then
+
+              call Assert(lFALSE,'parameter '//quote(apar(ipar))//' has been assigned to ' &
+              //'parameter group "none" ' &
+              //'in file '//quote(pPARAMETER_DATA_FILE(1))//' but is not tied or fixed.', &
+              trim(__FILE__), __LINE__)
+
 !              call addquote(pardatfile,sString)
 !               write(amessage,1471)trim(apar(ipar)),trim(sString)
 ! 1471         format('parameter "',a,'" has been assigned to parameter group "none" ', &
 !              'in file ',a,' but is not tied or fixed.')
 !              go to 9800
-!            else
-!              go to 1500
-!            end if
-!          end if
-!          if(ipar.ne.1)then
-!            do i=1,ipar-1
-!              if(pargp(i) == apargp) go to 1500
-!            end do
-!          end if
-!          if(f_numpargp.ne.0)then
-!            do i=1,f_numpargp
-!              if(apargp == f_pargpnme(i))then
-!                npargp=npargp+1
-!                pargpnme(npargp)=f_pargpnme(i)
-!                inctyp(npargp)=f_inctyp(i)
-!                derinc(npargp)=f_derinc(i)
-!                derinclb(npargp)=f_derinclb(i)
-!                forcen(npargp)=f_forcen(i)
-!                derincmul(npargp)=f_derincmul(i)
-!                dermthd(npargp)=f_dermthd(i)
-!                go to 1500
-!              end if
-!            end do
-!          end if
-!          npargp=npargp+1
-!          pargpnme(npargp)=apargp
-!          inctyp(npargp)='relative'
-!          derinc(npargp)=0.01
-!          derinclb(npargp)=0.00
-!          forcen(npargp)='switch'
-!          derincmul(npargp)=2.0
-!          dermthd(npargp)='parabolic'
-! 1500     continue
-!        end do
+            else
+              go to 1500
+            end if
+          end if
+          if(ipar.ne.1)then
+            do i=1,ipar-1
+              if(pargp(i) == apargp) go to 1500
+            end do
+          end if
+          if(f_numpargp.ne.0)then
+            do i=1,f_numpargp
+              if(apargp == f_pargpnme(i))then
+                npargp=npargp+1
+                pargpnme(npargp)=f_pargpnme(i)
+                inctyp(npargp)=f_inctyp(i)
+                derinc(npargp)=f_derinc(i)
+                derinclb(npargp)=f_derinclb(i)
+                forcen(npargp)=f_forcen(i)
+                derincmul(npargp)=f_derincmul(i)
+                dermthd(npargp)=f_dermthd(i)
+                go to 1500
+              end if
+            end do
+          end if
+          npargp=npargp+1
+          pargpnme(npargp)=apargp
+          inctyp(npargp)='relative'
+          derinc(npargp)=0.01
+          derinclb(npargp)=0.00
+          forcen(npargp)='switch'
+          derincmul(npargp)=2.0
+          dermthd(npargp)='parabolic'
+ 1500     continue
+        end do
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! ! -- The "* control data" section of the PEST control file is now written.
@@ -1595,12 +1658,8 @@ subroutine pest_files(pBlock, TS)
 ! -- The "* observation data" section of the PEST control file is now written.
 ! -- First the time series observations are dealt with.
 !
+        write(LU_PEST_CONTROL_FILE,fmt="('* observation data')")
 
-
-
-
-
-!        write(LU_PEST_CONTROL_FILE,1705)
 ! 1705   format('* observation data')
 !
 !        iout=0
@@ -1687,7 +1746,70 @@ subroutine pest_files(pBlock, TS)
 ! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
 !          end do
 !        end do
-!
+
+    do i=1,iNumSeries
+
+      pTS_Observed => TS%getTS(TS%tTSComparison(i)%sObservedSeries)
+      pTS_Modeled => TS%getTS(TS%tTSComparison(i)%sModeledSeries)
+
+      call Assert(pTS_Modeled%iListOutputPosition > 0, &
+        "The modeled time series "//quote(TS%tTSComparison(i)%sModeledSeries) &
+        //" does not appear in the most recent list output block", &
+        trim(__FILE__),__LINE__)
+
+      do j=1,size(pTS_Observed%tData)
+
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,g14.7,t40,g12.6,2x,a)") &
+          trim(pTS_Observed%sSeriesName)//"_"//trim(asChar(j)),pTS_Observed%tData(j)%rValue, &
+          TS%tTSComparison(i)%rWeightValue(j),trim(pTS_Observed%sSeriesName)
+
+      enddo
+
+!              trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
+! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
+
+    enddo
+
+    do i=1,iNumTables
+
+      pTable => TS%getTable(TS%tTableComparison(i)%sObservedTable)
+
+      if( pTable%iTableType == iSTABLE ) then
+        do j=9,size(pTable%tTableData)
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+          trim(pTable%sSeriesName)//"_"//trim(asChar(j)),trim(pTable%tTableData(j)%sValue(1)), &
+          TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
+        enddo
+
+      elseif( pTable%iTableType == iETABLE ) then
+        do j=1,size(pTable%tTableData)
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+          trim(pTable%sSeriesName)//"_"//trim(asChar(j)), &
+          trim(pTable%tTableData(j)%sValue(3)), &
+          TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
+        enddo
+
+      elseif( pTable%iTableType == iVTABLE ) then
+        do j=1,size(pTable%tTableData)
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+          trim(pTable%sSeriesName)//"_"//trim(asChar(j)),trim(pTable%tTableData(j)%sValue(1)), &
+          TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
+        enddo
+
+      elseif( pTable%iTableType == iITABLE ) then
+        do j=1,size(pTable%tTableData)
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+          trim(pTable%sSeriesName)//"_"//trim(asChar(j)),trim(pTable%tTableData(j)%sValue(1)), &
+          TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
+        enddo
+
+      endif
+!              trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
+! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
+
+    enddo
+
+
 ! ! -- Now we handle S_TABLE observations.
 !
 ! 2100   continue
@@ -1975,33 +2097,32 @@ subroutine pest_files(pBlock, TS)
 !
 ! 2400   continue
 !
-!        write(LU_PEST_CONTROL_FILE,2410)
+        write(LU_PEST_CONTROL_FILE,fmt="('* model command line')")
 ! 2410   format('* model command line')
-!        if(modcomline == ' ')modcomline='model'
+        if(modcomline == ' ')modcomline='model'
 ! !       call addquote(modcomline,bstring)
-! !       write(LU_PEST_CONTROL_FILE,2420) trim(bstring)
-!        write(LU_PEST_CONTROL_FILE,2420) trim(modcomline)
+       write(LU_PEST_CONTROL_FILE,fmt="(a)") quote(modcomline)
 ! 2420   format(a)
 !
 ! ! -- The "* model input/output" section of the PEST control file is written.
 !
-!        write(LU_PEST_CONTROL_FILE,2430)
+        write(LU_PEST_CONTROL_FILE,fmt="('* model input/output')")
 ! 2430   format('* model input/output')
-!        do i=1,numtempfile
-!          if(modfile(i) == ' ')then
+        do i=1,numtempfile
+          if(modfile(i) == ' ')then
 !            call num2char(i,anum)
-!            modfile(i)='model'//trim(anum)//'.in'
-!          end if
+            modfile(i)='model'//trim(asChar(i))//'.in'
+          end if
 !          call addquote(tempfile(i),bstring)
 !          call addquote(modfile(i),cstring)
-!          write(LU_PEST_CONTROL_FILE,2440) trim(bstring),trim(cstring)
+          write(LU_PEST_CONTROL_FILE,fmt="(a,3x,a)") quote(tempfile(i)),quote(modfile(i))
 ! 2440     format(a,3x,a)
-!        end do
+        end do
 !        call addquote(instructfile,bstring)
 !        call addquote(sListOutputFile_g,cstring)
-!        write(LU_PEST_CONTROL_FILE,2440) trim(bstring),trim(cstring)
-!        close(unit=LU_PEST_CONTROL_FILE)
-!
+        write(LU_PEST_CONTROL_FILE,fmt="(a,3x,a)") quote(sMostRecentInstructionFile), &
+            quote(sMostRecentListOutputFile)
+        close(unit=LU_PEST_CONTROL_FILE)
 !
 !        write(*,2460) trim(sString)
 !        write(LU_REC,2460) trim(sString)

@@ -419,6 +419,72 @@ end function compute_hyd_indices_MA
 
 !------------------------------------------------------------------------------
 
+function compute_hyd_indices_ML(pStats)  result(ML)
+
+  type (T_STATS_COLLECTION), pointer :: pStats
+  type(T_HI), dimension(:), pointer :: ML
+
+   ! [ LOCALS ]
+   integer(kind=T_INT) :: i
+   real (kind=T_SGL) :: rTempVal
+   real (kind=T_SGL), dimension(iNUM_QUANTILES) :: &
+          rQuantilesOfMonthlyMeanFlow, rQuantilesOfAnnualMeanFlow
+   real (kind=T_SGL), dimension(:), allocatable :: rMeanMonthlyFlowTS
+   real (kind=T_SGL), dimension(:), allocatable :: rMeanAnnualFlowTS
+   real (kind=T_DBL) :: rMean, rStdDev
+
+   allocate(ML(22) )
+
+   ML = (/ &
+     T_HI( 2,'Mean minimum monthly flow, January',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, February',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, March',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, April',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, May',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, June',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, July',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, August',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, September',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, October',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, November',rZERO), &
+     T_HI( 2,'Mean minimum monthly flow, December',rZERO), &
+     T_HI( 1,'CV, Minimum monthly flows',rZERO), &
+     T_HI( 1,'Mean annual minimum / median annual minimum',rZERO), &
+     T_HI( 1,'Mean minimum flow / mean annual flow for all years',rZERO), &
+     T_HI( 1,'Median minimum flow / median annual flow for all years',rZERO), &
+     T_HI( 1,'7-day minimum flow / mean annual flow for all years',rZERO), &
+     T_HI( 1,'CV, 7-day minimum flow / mean annual flow for all years',rZERO), &
+     T_HI( 1,'Mean, ratio of minimum daily flow to mean daily flow times 100',rZERO), &
+     T_HI( 1,'Ratio of baseflow volume to total volume',rZERO), &
+     T_HI( 1,'CV, annual minimum flows over all years',rZERO), &
+     T_HI( 1,'Mean annual minimum flow / catchment area',rZERO) &
+     /)
+
+
+   do i=1,12
+     ML(i)%rValue = mean(PACK(pStats%pByYearAndMonth(:,i)%rMin, &
+                              pStats%pByYearAndMonth(:,i)%lValid))
+   enddo
+
+   rMean = mean(PACK(pStats%pByYearAndMonth(:,:)%rMin, &
+                              pStats%pByYearAndMonth(:,:)%lValid))
+
+   rStdDev = stddev(PACK(pStats%pByYearAndMonth(:,:)%rMin, &
+                              pStats%pByYearAndMonth(:,:)%lValid))
+
+   ML(13)%rValue = rStdDev * 100. / rMean
+
+   ML(14)%rValue = mean( PACK(pStats%pByYear(:)%rMin, &
+                              pStats%pByYear(:)%lValid) &
+                         / PACK(pStats%pByYear(:)%rMean, &
+                              pStats%pByYear(:)%lValid) )
+
+   return
+
+end function compute_hyd_indices_ML
+
+!------------------------------------------------------------------------------
+
 subroutine write_base_stats(pBaseStats, sDescription)
 
   type (T_HI_STATS) :: pBaseStats

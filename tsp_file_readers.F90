@@ -25,8 +25,9 @@ subroutine read_USGS_NWIS(pBlock, TS)
 
   type (T_BLOCK), pointer :: pBlock
   type (TIME_SERIES_COLLECTION), intent(inout) :: TS
-  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
-  type(T_USGS_NWIS_DAILY),dimension(:), allocatable :: pTempDaily
+
+!  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
+!  type(T_USGS_NWIS_DAILY),dimension(:), allocatable :: pTempDaily
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: iMM, iDD, iYYYY
@@ -44,7 +45,9 @@ subroutine read_USGS_NWIS(pBlock, TS)
   integer (kind=T_INT), dimension(200) :: iTotalNumLines
   character (len=MAXNAMELENGTH), dimension(200) :: sSiteIDArray
   character (len=80), dimension(200) :: sSiteDescriptionArray
-  type (T_TIME_SERIES), dimension(:), allocatable :: tTS
+  type (T_TIME_SERIES), dimension(:), pointer :: pTS
+  type (T_TIME_SERIES), pointer :: pTempSeries
+!  type (T_TIME_SERIES), dimension(:), allocatable :: tTS
   integer (kind=T_INT) :: iSiteNum
   integer (kind=T_INT) :: iTotalNumSites
   integer (kind=T_INT) :: iNewIndex
@@ -92,6 +95,7 @@ subroutine read_USGS_NWIS(pBlock, TS)
       cycle
     elseif(sRecord(1:9) .eq. 'agency_cd') then
       read(unit=LU_DATA, fmt="(a)",iostat=iStat) sRecord
+
 !      iSiteNum = iSiteNum + 1
       cycle
     else if(sRecord(1:1) .eq. "#") then
@@ -156,8 +160,9 @@ subroutine read_USGS_NWIS(pBlock, TS)
 
   ! ALLOCATE memory for the GAGE object (collection of gages)
 !  allocate(pGage(iTotalNumSites),stat=iStat)
-  allocate(pGage(size(pSITE)),stat=iStat)
-  call Assert(iStat==0,"Problem allocating memory for NWIS data structure", &
+!  allocate(pGage(size(pSITE)),stat=iStat)
+  allocate(pTS(size(pSITE)),stat=iStat)
+  call Assert(iStat==0,"Problem allocating memory for time series data structure", &
      TRIM(__FILE__),__LINE__)
   call writelog("Allocated space for "//trim(asChar(size(pSITE)))//" sites")
 
@@ -166,8 +171,9 @@ subroutine read_USGS_NWIS(pBlock, TS)
   do iSiteNum = 1,iTotalNumSites
     if(isElement(sSiteIDArray(iSiteNum),pSITE)) then
       iNewIndex = iNewIndex + 1
-      allocate(pGage(iNewIndex)%pGageData(iTotalNumLines(iSiteNum)),stat=iStat)
-      call Assert(iStat==0,"Problem allocating memory for NWIS data structure", &
+!      allocate(pGage(iNewIndex)%pGageData(iTotalNumLines(iSiteNum)),stat=iStat)
+      allocate(pTS(iNewIndex)%tData(iTotalNumLines(iSiteNum)),stat=iStat)
+      call Assert(iStat==0,"Problem allocating memory for time series data structure", &
         TRIM(__FILE__),__LINE__)
       call echolog(" => Site "//trim(sSiteIDArray(iSiteNum))//" has "// &
         trim(asChar(iTotalNumLines(iSiteNum)))//" data elements")
@@ -214,8 +220,9 @@ subroutine read_USGS_NWIS(pBlock, TS)
       sOldSiteID = sSiteID
       iSiteNum = iSiteNum + 1
       iLineNum = 0
-      pGage(iSiteNum)%sAgencyCode = TRIM(ADJUSTL(sAgencyCode))
-      pGage(iSiteNum)%sSiteNumber = TRIM(ADJUSTL(sSiteID))
+!      pGage(iSiteNum)%sAgencyCode = TRIM(ADJUSTL(sAgencyCode))
+!      pGage(iSiteNum)%sSiteNumber = TRIM(ADJUSTL(sSiteID))
+      pTS(iSiteNum)%sSeriesName = TRIM(ADJUSTL(sSiteID))
     endif
 
     ! obtain a value for the DATE field
@@ -235,36 +242,44 @@ subroutine read_USGS_NWIS(pBlock, TS)
 
     if(len_trim(sItem)>0 .and. iIceFlag == 0 .and. scan(sItem,"_") == 0) then
       iLineNum = iLineNum + 1
-      read(sItem,fmt=*) pGage(iSiteNum)%pGageData(iLineNum)%rMeanDischarge
+!      read(sItem,fmt=*) pGage(iSiteNum)%pGageData(iLineNum)%rMeanDischarge
+      read(sItem,fmt=*) pTS(iSiteNum)%tData(iLineNum)%rValue
       call Chomp_tab(sRecord, sItem)
-      pGage(iSiteNum)%pGageData(iLineNum)%sDataFlag = TRIM(sItem)
+!      pGage(iSiteNum)%pGageData(iLineNum)%sDataFlag = TRIM(sItem)
+      pTS(iSiteNum)%tData(iLineNum)%sDataFlag = TRIM(sItem)
     else
       cycle
     end if
 
       ! we have valid data; record the date
-    pGage(iSiteNum)%pGageData(iLineNum)%tDT = tCurrDate
+!    pGage(iSiteNum)%pGageData(iLineNum)%tDT = tCurrDate
+    pTS(iSiteNum)%tData(iLineNum)%tDT = tCurrDate
 
     ! calculate a value for the WATER YEAR field
-    call pGage(iSiteNum)%pGageData(iLineNum)%tDT%calcWaterYear()
+!    call pGage(iSiteNum)%pGageData(iLineNum)%tDT%calcWaterYear()
+    call pTS(iSiteNum)%tData(iLineNum)%tDT%calcWaterYear()
 
   end do
 
-  allocate(tTS(size(pGage)),stat=iStat)
-  call Assert(iStat==0,"Memory allocation error",trim(__FILE__),__LINE__)
+!  allocate(tTS(size(pGage)),stat=iStat)
+!  call Assert(iStat==0,"Memory allocation error",trim(__FILE__),__LINE__)
 
-  do i=1,size(pGage)
+  do i=1,size(pTS)
 
-    sNewSeriesName = pNEW_SERIES_NAME(i)
-    if(size(pGage(i)%pGageData) > 0) then            ! if there are no records, no point in adding
+!    sNewSeriesName = pNEW_SERIES_NAME(i)
+     pTS(i)%sSeriesname = pNEW_SERIES_NAME(i)
+!    if(size(pGage(i)%pGageData) > 0) then            ! if there are no records, no point in adding
+    if(size(pTS(i)%tData) > 0) then            ! if there are no records, no point in adding
       do j=1,size(pDESCRIPTION)
-        if(index(trim(pDESCRIPTION(j)), trim(pGage(i)%sSiteNumber)) > 0) &
-          pGage(i)%sDescription = trim(pDESCRIPTION(j))
+        if(index(trim(pDESCRIPTION(j)), trim(pTS(i)%sSeriesName)) > 0) &
+          pTS(i)%sDescription = trim(pDESCRIPTION(j))
       enddo
-      call tTS(i)%new(pGage(i),sNewSeriesName)  ! a time series object
-      call echolog(" ==> Added series "//quote(tTS(i)%sSeriesname)//" from site " &
-         //trim(pSITE(i))//"; "//trim(asChar(size(tTS(i)%tData)))//" data elements")
-      call TS%add(tTS(i))
+!      call tTS(i)%new(pGage(i),sNewSeriesName)  ! a time series object
+!      call echolog(" ==> Added series "//quote(pTS(i)%sSeriesname)//" from site " &
+!         //trim(pSITE(i))//"; "//trim(asChar(size(pTS(i)%tData)))//" data elements")
+      call pTS(i)%findDateMinAndMax()
+      pTempSeries => pTS(i)
+      call TS%add(pTempSeries)
     endif
 
   end do
@@ -286,8 +301,9 @@ subroutine get_mul_series_ssf(pBlock, TS)
   type (TIME_SERIES_COLLECTION), intent(inout) :: TS
 
   ! [ LOCALS ]
-  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
-  type(T_USGS_NWIS_DAILY),dimension(:), allocatable :: pTempDaily
+!  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
+!  type(T_USGS_NWIS_DAILY),dimension(:), allocatable :: pTempDaily
+  type (T_TIME_SERIES), dimension(:), pointer :: pTS
 
   integer (kind=T_INT) :: iMM, iDD, iYYYY
   integer (kind=T_INT) :: iStat
@@ -304,7 +320,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
   integer (kind=T_INT),dimension(200)  :: iTotalNumLines
 
   character (len=MAXNAMELENGTH), dimension(200) :: sSiteIDArray
-  type (T_TIME_SERIES), dimension(:), allocatable :: tTS
+!  type (T_TIME_SERIES), dimension(:), allocatable :: tTS
+  type (T_TIME_SERIES), pointer :: pTempSeries
   integer (kind=T_INT) :: iSiteNum
   integer (kind=T_INT) :: iTotalNumSites
   integer (kind=T_INT) :: iNewIndex
@@ -319,8 +336,6 @@ subroutine get_mul_series_ssf(pBlock, TS)
 
   character (len=256) sRecord, sItem
   character (len=256) sDateTxt, sTimeTxt
-  character (len=256) sNewSeriesName
-
 
   iCount = 0; i=0; iTotalNumLines = 0; iSiteNum = 0; iTotalNumSites = 0
   sOldSiteID = ""; sSiteID = ""
@@ -399,7 +414,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
 
   ! ALLOCATE memory for the GAGE object (collection of gages)
 !  allocate(pGage(iTotalNumSites),stat=iStat)
-  allocate(pGage(size(pSITE)),stat=iStat)
+!  allocate(pGage(size(pSITE)),stat=iStat)
+  allocate(pTS(size(pSITE)),stat=iStat)
   call Assert(iStat==0,"Problem allocating memory for SSF data structure", &
      TRIM(__FILE__),__LINE__)
   call writelog("Allocated space for "//trim(asChar(size(pSITE)))//" sites")
@@ -409,7 +425,7 @@ subroutine get_mul_series_ssf(pBlock, TS)
   do iSiteNum = 1,iTotalNumSites
     if(isElement(sSiteIDArray(iSiteNum),pSITE)) then
       iNewIndex = iNewIndex + 1
-      allocate(pGage(iNewIndex)%pGageData(iTotalNumLines(iSiteNum)),stat=iStat)
+      allocate(pTS(iNewIndex)%tData(iTotalNumLines(iSiteNum)),stat=iStat)
       call Assert(iStat==0,"Problem allocating memory for SSF data structure", &
         TRIM(__FILE__),__LINE__)
       call echolog("Site number "//trim(sSiteIDArray(iSiteNum))//" has "// &
@@ -444,7 +460,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
       sOldSiteID = sSiteID
       iSiteNum = iSiteNum + 1
       iLineNum = 0
-      pGage(iSiteNum)%sSiteNumber = sSiteID
+!      pGage(iSiteNum)%sSiteNumber = sSiteID
+      pTS(iSiteNum)%sSeriesName = sSiteID
     endif
 
     ! obtain a value for the DATE field
@@ -467,40 +484,52 @@ subroutine get_mul_series_ssf(pBlock, TS)
 
     if(len_trim(sItem)>0) then
       iLineNum = iLineNum + 1
-      read(sItem,fmt=*) pGage(iSiteNum)%pGageData(iLineNum)%rMeanDischarge
+!      read(sItem,fmt=*) pGage(iSiteNum)%pGageData(iLineNum)%rMeanDischarge
+      read(sItem,fmt=*) pTS(iSiteNum)%tData(iLineNum)%rValue
       call Chomp(sRecord, sItem, DELIMITERS)
-      pGage(iSiteNum)%pGageData(iLineNum)%sDataFlag = TRIM(sItem)
+!      pGage(iSiteNum)%pGageData(iLineNum)%sDataFlag = TRIM(sItem)
+      pTS(iSiteNum)%tData(iLineNum)%sDataFlag = TRIM(sItem)
     else
       cycle
     end if
 
     ! we have valid data; record the date
-    pGage(iSiteNum)%pGageData(iLineNum)%tDT = tCurrDate
-    call pGage(iSiteNum)%pGageData(iLineNum)%tDT%calcWaterYear()
+!    pGage(iSiteNum)%pGageData(iLineNum)%tDT = tCurrDate
+!    call pGage(iSiteNum)%pGageData(iLineNum)%tDT%calcWaterYear()
+
+    pTS(iSiteNum)%tData(iLineNum)%tDT = tCurrDate
+    call pTS(iSiteNum)%tData(iLineNum)%tDT%calcWaterYear()
 
   end do
 
-  allocate(tTS(size(pGage)),stat=iStat)
-  call Assert(iStat==0,"Memory allocation error",trim(__FILE__),__LINE__)
+!  allocate(tTS(size(pGage)),stat=iStat)
+!  call Assert(iStat==0,"Memory allocation error",trim(__FILE__),__LINE__)
 
-  do i=1,size(pGage)
 
-    sNewSeriesName = pNEW_SERIES_NAME(i)
-    if(size(pGage(i)%pGageData) > 0) then    ! if there are no records, no point in adding
-      pGage(i)%sDescription = "Series "//quote(sNewSeriesName)//" from SSF file " &
+  do i=1,size(pTS)
+    if(size(pTS(i)%tData) > 0) then    ! if there are no records, no point in adding
+
+      pTS(i)%sDescription = "Series "//quote(pNEW_SERIES_NAME(i))//" from SSF file " &
          //quote(pFILE(1))//", site "//trim(pSITE(i))
-      call tTS(i)%new(pGage(i),sNewSeriesName)    ! a time series object
-      call echolog(" ==> Added series "//quote(tTS(i)%sSeriesname)//" from site " &
-         //trim(pSITE(i))//"; "//trim(asChar(size(tTS(i)%tData)))//" data elements")
+      pTS(i)%sSeriesName = pNEW_SERIES_NAME(i)
+!      call tTS(i)%new(pGage(i),sNewSeriesName)    ! a time series object
+      pTempSeries => pTS(i)
+      call pTempSeries%findDateMinAndMax()
+      call TS%add(pTempSeries)
+!      call echolog(" ==> Added series "//quote(pTS(i)%sSeriesname)//" from site " &
+!         //trim(pSITE(i))//"; "//trim(asChar(size(pTS(i)%tData)))//" data elements")
 
-      call TS%add(tTS(i))
     endif
 
   end do
 
   close(unit=LU_DATA)
 
-  deallocate(pFILE); deallocate(pSITE); deallocate(pNEW_SERIES_NAME)
+  nullify(pTempSeries)
+  nullify(pTS)
+  if(associated(pFILE) ) deallocate(pFILE)
+  if(associated(pSITE) ) deallocate(pSITE)
+  if(associated(pNEW_SERIES_NAME) ) deallocate(pNEW_SERIES_NAME)
 
 end subroutine get_mul_series_ssf
 
@@ -514,8 +543,9 @@ subroutine get_mul_series_statvar(pBlock, TS)
   type (TIME_SERIES_COLLECTION), intent(inout) :: TS
 
   ! [ LOCALS ]
-  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
-  type(T_USGS_NWIS_DAILY),dimension(:), allocatable :: pTempDaily
+!  type(T_USGS_NWIS_GAGE),dimension(:), pointer :: pGage
+!  type(T_USGS_NWIS_DAILY),dimension(:), allocatable :: pTempDaily
+  type (T_TIME_SERIES), dimension(:), pointer :: pTS
 
   integer (kind=T_INT) :: iStat
   integer (kind=T_INT) :: iTotalNumLines
@@ -532,8 +562,8 @@ subroutine get_mul_series_statvar(pBlock, TS)
   integer (kind=T_INT) :: iNumVariables
   integer (kind=T_INT) :: iNumOutputVariables
   logical (kind=T_LOGICAL) :: lMatch
-  type (T_TIME_SERIES), dimension(:), allocatable :: tTS
-
+!  type (T_TIME_SERIES), dimension(:), allocatable :: tTS
+  type (T_TIME_SERIES), pointer :: pTempSeries
   type (T_DATETIME) :: tDATETIME_1, tDATETIME_2, tCurrDate
 
   character (len=256), dimension(:), allocatable :: sPRMSVariable
@@ -618,7 +648,6 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   end do
 
-  print *, "#10"
   ! check to see if the VARIABLE_NAMEs given by user are actually found in the statvar file
   if(.not. str_compare(pVARIABLE_NAME(1),"NA")) then
     do i=1,size(pVARIABLE_NAME)
@@ -634,7 +663,6 @@ subroutine get_mul_series_statvar(pBlock, TS)
     enddo
   endif
 
-    print *, "#11"
   ! if the user has not supplied series names, we assume that the variable names and IDs in the
   ! file are sufficient and that all data elements should be read in
   if(str_compare(pVARIABLE_NAME(1),"NA")) then
@@ -651,7 +679,6 @@ subroutine get_mul_series_statvar(pBlock, TS)
     enddo
   endif
 
-  print *, "#12"
   iNumOutputVariables = size(pVARIABLE_NAME)
 
   ! rewind the file and make a second pass through the file
@@ -660,14 +687,14 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   ! ALLOCATE memory for the GAGE object (collection of gages)
 !  allocate(pGage(iTotalNumSites),stat=iStat)
-  allocate(pGage(iNumOutputVariables),stat=iStat)
+  allocate(pTS(iNumOutputVariables),stat=iStat)
   call Assert(iStat==0,"Problem allocating memory for statvar data structure", &
      TRIM(__FILE__),__LINE__)
   call writelog("Allocated space for "//trim(asChar(iNumOutputVariables))//" variables")
 
   ! ALLOCATE memory for the time-series data associated with each output variable
   do i=1,iNumOutputVariables
-    allocate(pGage(i)%pGageData(iTotalNumLines),stat=iStat)
+    allocate(pTS(i)%tData(iTotalNumLines),stat=iStat)
     call Assert(iStat==0,"Problem allocating memory for statvar data structure", &
       TRIM(__FILE__),__LINE__)
   enddo
@@ -695,27 +722,31 @@ subroutine get_mul_series_statvar(pBlock, TS)
     iLineNum = iLineNum + 1
 
     do j=1,iNumOutputVariables
-      pGage(j)%pGageData(iLineNum)%rMeanDischarge = rStatvarValues(iVariableNameIndex(j) )
-      pGage(j)%pGageData(iLineNum)%tDT = tCurrDate
-      call pGage(j)%pGageData(iLineNum)%tDT%calcWaterYear()
+!      pGage(j)%pGageData(iLineNum)%rMeanDischarge = rStatvarValues(iVariableNameIndex(j) )
+!      pGage(j)%pGageData(iLineNum)%tDT = tCurrDate
+!      call pGage(j)%pGageData(iLineNum)%tDT%calcWaterYear()
+      pTS(j)%tData(iLineNum)%rValue = rStatvarValues(iVariableNameIndex(j) )
+      pTS(j)%tData(iLineNum)%tDT = tCurrDate
+      call pTS(j)%tData(iLineNum)%tDT%calcWaterYear()
+
     enddo
 
 
   end do
 
-  allocate(tTS(size(pGage)),stat=iStat)
-  call Assert(iStat==0,"Memory allocation error",trim(__FILE__),__LINE__)
+!  allocate(tTS(size(pGage)),stat=iStat)
+!  call Assert(iStat==0,"Memory allocation error",trim(__FILE__),__LINE__)
 
-  do i=1,size(pGage)
+  do i=1,size(pTS)
 
-    sNewSeriesName = pNEW_SERIES_NAME(i)
-    if(size(pGage(i)%pGageData) > 0) then    ! if there are no records, no point in adding
-      pGage(i)%sDescription = "Series "//quote(sNewSeriesName)//" from statvar file " &
+    if(size(pTS(i)%tData) > 0) then    ! if there are no records, no point in adding
+      pTS(i)%sDescription = "Series "//quote(sNewSeriesName)//" from statvar file " &
          //quote(pFILE(1))
-      call tTS(i)%new(pGage(i),sNewSeriesName)    ! a time series object
-      call echolog(" ==> Added series "//quote(tTS(i)%sSeriesname))
-
-      call TS%add(tTS(i))
+      pTS(i)%sSeriesName = pNEW_SERIES_NAME(i)
+!      call tTS(i)%new(pGage(i),sNewSeriesName)    ! a time series object
+      pTempSeries => pTS(i)
+      call TS%add(pTempSeries)
+!     call echolog(" ==> Added series "//quote(pTS(i)%sSeriesname))
     endif
 
   end do
@@ -757,7 +788,7 @@ subroutine get_series_wdm(pBlock, TS)
   type (T_DATETIME) :: tDATETIME_1
   type (T_DATETIME) :: tDATETIME_2
 
-  type (T_TIME_SERIES) :: tTS
+  type (T_TIME_SERIES), pointer :: pTS
 
   integer (kind=T_INT), dimension(:), allocatable :: iMM, iDD, iYY, iHour, iMin, iSec
   type (T_DATETIME), dimension(:), allocatable :: tDate
@@ -851,10 +882,10 @@ subroutine get_series_wdm(pBlock, TS)
 
   ! for now, only allow one TS per block to be added
 
-  call tTS%new(sNewSeriesName, "Series from WDM file", &
+  call pTS%new(sNewSeriesName, "Series from WDM file", &
      pack(tDate, lSelect), pack(rValue, lSelect) )
 
-  call TS%add(tTS)
+  call TS%add(pTS)
 
 
   end subroutine get_series_wdm

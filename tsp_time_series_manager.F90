@@ -12,20 +12,6 @@ module tsp_time_series_manager
   integer (kind=T_INT), parameter :: iMONTHLY_DATA = 2
   integer (kind=T_INT), parameter :: iANNUAL_DATA = 3
 
-  type T_USGS_NWIS_DAILY
-    integer (kind=T_INT) :: iWaterYear
-    type (T_DATETIME) :: tDT
-    real (kind=T_SGL) :: rMeanDischarge
-    character (len=10) :: sDataFlag
-  end type T_USGS_NWIS_DAILY
-
-  type T_USGS_NWIS_GAGE
-    character (len=256) :: sAgencyCode
-    character (len=256) :: sSiteNumber
-    character (len=256) :: sDescription = ""
-    type (T_USGS_NWIS_DAILY), dimension(:), allocatable :: pGageData
-  end type T_USGS_NWIS_GAGE
-
   type T_TIME_SERIES_DATA
     integer (kind=T_INT) :: iWaterYear     = 0
     type (T_DATETIME) :: tDT
@@ -40,6 +26,8 @@ module tsp_time_series_manager
   end type T_TIME_SERIES_DATA
 
   type T_TIME_SERIES
+    type (T_TIME_SERIES), pointer :: pNext => null()
+    type (T_TIME_SERIES), pointer :: pPrevious => null()
     character (len=MAXNAMELENGTH) :: sSiteName = ""
     character (len=MAXNAMELENGTH) :: sSeriesName = ""
     character (len=256) :: sDescription = ""
@@ -47,7 +35,7 @@ module tsp_time_series_manager
     type (T_DATETIME) :: tStartDate
     type (T_DATETIME) :: tEndDate
     integer (kind=T_INT) :: iDataType = iDAILY_DATA
-    integer (kind=T_INT) :: iListOutputPosition = 0
+    integer (kind=T_INT) :: iListOutputPosition = -999
     type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
 
   contains
@@ -70,6 +58,7 @@ module tsp_time_series_manager
                                 new_time_series_fm_DT_sub
     procedure :: findDateMinAndMax => find_min_and_max_date_sub
     procedure :: findDataGaps => find_data_gaps_fn
+    procedure :: findHydroEvents => find_hydro_events_fn
     procedure :: integrate => integrate_fn
 
 !    procedure :: reducetimespan => reduce_time_span_sub
@@ -152,8 +141,8 @@ contains
     character(len=256) ::  sRecord, sItem
 
     iCount = size(iMonth)
-!    call Assert(iCount == size(rValue), "Date and/or value vectors of unequal length", &
-!        TRIM(__FILE__), __LINE__)
+    call Assert(iCount == size(rValue), "Date and/or value vectors of unequal length", &
+        TRIM(__FILE__), __LINE__)
 
     this%sSeriesName = TRIM(sSeriesName)
     call Warn(len_trim(sSeriesName) <= MAXNAMELENGTH, &
@@ -225,10 +214,10 @@ contains
 
 !------------------------------------------------------------------------------
 
-  subroutine new_time_series_fm_NWIS_sub(this, pGage, sNewSeriesName)
+  subroutine new_time_series_fm_NWIS_sub(this, tTS, sNewSeriesName)
 
     class(T_TIME_SERIES) :: this
-    type (T_USGS_NWIS_GAGE) :: pGage
+    type (T_TIME_SERIES) :: tTS
     character(len=256), optional :: sNewSeriesName
 
     ! [ LOCALS ]
@@ -237,21 +226,21 @@ contains
     integer (kind=T_INT) :: i
     character(len=256) ::  sRecord, sItem
 
-    iCount = size(pGage%pGageData)
+    iCount = size(tTS%tData)
 
-    this%sSiteName = TRIM(pGage%sSiteNumber)
+    this%sSiteName = TRIM(tTS%sSiteName)
 
     if(present(sNewSeriesName)) then
       this%sSeriesName = TRIM(sNewSeriesName)
       call Warn(len_trim(sNewSeriesName) <= MAXNAMELENGTH, &
         "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
     else
-      this%sSeriesName = TRIM(pGage%sSiteNumber)
-      call Warn(len_trim(pGage%sSiteNumber) <= MAXNAMELENGTH, &
+      this%sSeriesName = TRIM(tTS%sSiteName)
+      call Warn(len_trim(tTS%sSiteName) <= MAXNAMELENGTH, &
         "Series name exceeds "//asChar(MAXNAMELENGTH)//" characters and will be truncated")
     end if
 
-    this%sDescription = TRIM(pGage%sDescription)
+    this%sDescription = TRIM(tTS%sDescription)
 
     if(allocated(this%tData)) deallocate(this%tData, stat=iStat)
     call Assert(iStat==0, "Unable to deallocate memory to create new time series", &
@@ -261,10 +250,10 @@ contains
     call Assert(iStat==0, "Unable to allocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
-    this%tData%iWaterYear = pGage%pGageData%iWaterYear
-    this%tData%tDT = pGage%pGageData%tDT
-    this%tData%rValue = pGage%pGageData%rMeanDischarge
-    this%tData%sDataFlag = pGage%pGageData%sDataFlag
+    this%tData%iWaterYear = tTS%tData%iWaterYear
+    this%tData%tDT = tTS%tData%tDT
+    this%tData%rValue = tTS%tData%rValue
+    this%tData%sDataFlag = tTS%tData%sDataFlag
 
     call this%findDateMinAndMax()
 
@@ -317,7 +306,9 @@ contains
 
    iCount = this%selectByDate(tGE_DT, tLE_DT)
 
-   call Assert(iCount > 2, "Not enough data to perform integration", &
+   call Assert(iCount > 2, "Not enough data to perform integration ("// &
+     trim(this%sSeriesname)//", start:end = " &
+     //trim(tGE_DT%prettydate())//":"//trim(tLE_DT%prettydate())//")", &
      trim(__FILE__), __LINE__)
 
    ! we're subtracting this (large) value so that we can get away with using
@@ -334,7 +325,7 @@ contains
                                   / real(iAkimaResolution, kind=T_SGL)
 
    rX1 = real( pack(this%tData%tDT%iJulianDay, this%tData%lSelect), kind=T_DBL) - rOffset &
-           + real(this%tData%tDT%rFractionOfDay, kind=T_DBL)
+           + real( pack(this%tData%tDT%rFractionOfDay, this%tData%lSelect), kind=T_DBL)
 
    rY1 = pack(this%tData%rValue, this%tData%lSelect)
 
@@ -395,9 +386,9 @@ contains
     integer (kind=T_INT) :: i
     integer (kind=T_INT) :: iSize
     integer (kind=T_INT) :: iDelta
-    integer (kind=T_INT) :: iNumGaps
+    integer (kind=T_INT) :: iNumGaps, iNumGaps1
 
-    iNumGaps = 0
+    iNumGaps1 = 0
 
     iSize = size(this%tData)
 
@@ -406,12 +397,14 @@ contains
 
     do i=2,iSize
       iDelta = this%tData(i)%tDT%iJulianDay - this%tData(i-1)%tDT%iJulianDay
-      if(iDelta /= 1) iNumGaps = iNumGaps + 1
+      if(iDelta /= 1) iNumGaps1 = iNumGaps1 + 1
     enddo
 
-    if(iNumGaps > 0) then
+    if(iNumGaps1 > 0) then
 
-      allocate(pDateRange(iNumGaps + 1) )   ! we really care about the intervals, not the gaps!
+      allocate(pDateRange(iNumGaps1 + 1) )   ! we really care about the intervals, not the gaps!
+
+      ! set gap counter
       iNumGaps = 0
       tStartDate = this%tData(1)%tDT
 
@@ -419,6 +412,8 @@ contains
 
         iDelta = this%tData(i)%tDT%iJulianDay - this%tData(i-1)%tDT%iJulianDay
         if(iDelta /= 1) then
+
+          print *, i, iNumGaps, iSize, size(pDateRange)
           iNumGaps = iNumGaps + 1
           call pDateRange(iNumGaps)%new(tStartDate, this%tData(i-1)%tDT)
           tStartDate = this%tData(i+1)%tDT
@@ -438,7 +433,7 @@ contains
              pDateRange(iNumGaps)%tStartDate%listdate(), &
              pDateRange(iNumGaps)%tEndDate%listdate()
 
-    else
+    else   ! no gaps found; return a single date range encompassing all data
 
       allocate(pDateRange(1) )
       call pDateRange(1)%new(this%tData(1)%tDT, this%tData(iSize)%tDT)
@@ -490,8 +485,9 @@ contains
       tLE_DT = this%tEndDate
     endif
 
-    ! if this is TRUE, the select is only applied to elements that are
-    ! already selected (as in a previous step)
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
     if(present(keep)) then
       lKeep = keep
     else
@@ -499,14 +495,16 @@ contains
     endif
 
     if(lKeep) then
+
       do i=1,size(this%tData)
-        if(this%tData(i)%lSelect &
-              .and. this%tData(i)%tDT >= tGE_DT &
-              .and. this%tData(i)%tDT <= tLE_DT) then
+        if(this%tData(i)%tDT >= tGE_DT &
+            .and. this%tData(i)%tDT <= tLE_DT) then
           this%tData(i)%lSelect = lTRUE
         endif
       enddo
+
     else
+
       do i=1,size(this%tData)
         if(this%tData(i)%tDT >= tGE_DT &
               .and. this%tData(i)%tDT <= tLE_DT) then
@@ -515,11 +513,75 @@ contains
           this%tData(i)%lSelect = lFALSE
         endif
       enddo
+
     endif
 
     iCount = count(this%tData%lSelect)
 
   end function select_by_date_fn
+
+!------------------------------------------------------------------------------
+
+  function select_by_change_rate_fn(this, MinIncrease, MinDecrease, keep)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    real (kind=T_SGL), optional :: MinIncrease
+    real (kind=T_SGL), optional :: MinDecrease
+    logical (kind=T_LOGICAL), intent(in), optional :: keep
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    real (kind=T_SGL) :: rMinIncrease_Val
+    real (kind=T_SGL) :: rMinDecrease_Val
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+    real (kind=T_SGL) :: rDelta
+
+    ! if no arguments supplied, assume rise rate of 10% of median flow represents
+    if(present(MinIncrease)) then
+      rMinIncrease_Val = MinIncrease
+    else
+      rMinIncrease_Val = median(this%tData%rValue) * 0.10
+    endif
+
+    if(present(MinDecrease)) then
+      rMinDecrease_Val = MinDecrease
+    else
+      rMinDecrease_Val = -rMinIncrease_Val
+    endif
+
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
+    if(present(keep)) then
+      lKeep = keep
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+
+      do i=2,size(this%tData)
+        if( ( rDelta >= rMinIncrease_Val .or. rDelta <= rMinDecrease_Val ) ) then
+          this%tData(i)%lSelect = lTRUE
+        endif
+      enddo
+
+    else
+
+      do i=2,size(this%tData)
+        if( rDelta >= rMinIncrease_Val .or. rDelta <= rMinDecrease_Val )  then
+          this%tData(i)%lSelect = lTRUE
+        else
+          this%tData(i)%lSelect = lFALSE
+        endif
+      enddo
+
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_change_rate_fn
 
 !------------------------------------------------------------------------------
 
@@ -550,8 +612,9 @@ contains
       rLE_Val = huge(rLE_Val)
     endif
 
-    ! if this is TRUE, the select is only applied to elements that are
-    ! already selected (as in a previous step)
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
     if(present(keep)) then
       lKeep = keep
     else
@@ -559,22 +622,25 @@ contains
     endif
 
     if(lKeep) then
+
       do i=1,size(this%tData)
-        if(this%tData(i)%lSelect &
-              .and. this%tData(i)%rValue >= rGE_Val &
-              .and. this%tData(i)%rValue <= rLE_Val) then
+        if( this%tData(i)%rValue >= rGE_Val &
+            .and. this%tData(i)%rValue <= rLE_Val ) then
           this%tData(i)%lSelect = lTRUE
         endif
       enddo
+
     else
+
       do i=1,size(this%tData)
-        if(this%tData(i)%rValue >= rGE_Val &
-              .and. this%tData(i)%rValue <= rLE_Val) then
+        if( this%tData(i)%rValue >= rGE_Val &
+            .and. this%tData(i)%rValue <= rLE_Val ) then
           this%tData(i)%lSelect = lTRUE
         else
           this%tData(i)%lSelect = lFALSE
         endif
       enddo
+
     endif
 
     iCount = count(this%tData%lSelect)
@@ -692,6 +758,223 @@ contains
     enddo
 
   end subroutine list_output_instructions_sub
+
+!------------------------------------------------------------------------------
+
+  function find_hydro_events_fn(this, pBlock)    result(pTempSeries)
+
+      class(T_TIME_SERIES) :: this
+      type (T_BLOCK), pointer, optional :: pBlock
+      type (T_TIME_SERIES), pointer :: pTempSeries
+
+      ! [ LOCALS ]
+      integer (kind=T_INT) :: iYear, iMonth, iFirstYear
+      integer (kind=T_INT) :: iStat
+      integer (kind=T_INT) :: i
+      integer (kind=T_INT) :: iCount
+      real (kind=T_SGL) :: iSlope1, iSlope2
+      character (len=256) :: sBuf
+      type (T_DATETIME) :: tStartDate, tEndDate
+      type (T_DATETIME) :: tLagStartDate, tLagEndDate
+      type (T_DATETIME) :: tCurrentDate
+      type (T_STATS_COLLECTION), pointer :: pStats
+      character (len=MAXNAMELENGTH) :: sNewSeriesName
+      logical (kind=T_LOGICAL) :: lAddSuffix
+      logical (kind=T_LOGICAL), dimension(:), allocatable :: lSelect
+      type (T_DATETIME) :: tLastDate
+!      type (T_DATETIME)
+      real (kind=T_SGL) :: rLastValue
+      integer (kind=T_INT) :: iLastIndex
+
+      character (len=MAXARGLENGTH), dimension(:), pointer :: &
+         pNEW_SERIES_NAME
+      real (kind=T_SGL), dimension(:), pointer :: &
+         pWINDOW, pMIN_PEAK, pRISE_LAG, pFALL_LAG
+      real (kind=T_SGL) :: rWINDOW, rMIN_PEAK, rRISE_LAG, rFALL_LAG
+
+
+      tStartDate = this%tStartDate
+      tEndDate = this%tEndDate
+
+      if(present(pBlock) ) then
+
+        ! Process the standard "DATE_1", "DATE_2", "TIME_1", and "TIME_2" entries
+        ! tStartDate and tEndDate are return values
+        call processUserSuppliedDateTime(pBlock, tStartDate, tEndDate)
+
+        ! clip the desired date window to the range of actual data
+        if(tStartDate < this%tStartDate) tStartDate = this%tStartDate
+        if(tEndDate > this%tEndDate) tEndDate = this%tEndDate
+
+        pWINDOW => pBlock%getReal("WINDOW")
+        call assert(pWINDOW(1) > rNEAR_TINY, &
+          "No value was supplied for WINDOW in block starting at line" &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        call assert(pWINDOW(1) > rZERO, &
+          "Value supplied for WINDOW must be greater than zero in block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        rWINDOW = pWINDOW(1)
+
+        pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+        call assert(str_compare(pNEW_SERIES_NAME(1),"NA"), &
+          "No value was supplied for NEW_SERIES_NAME in block starting at line" &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        sNewSeriesName = trim(pNEW_SERIES_NAME(1) )
+
+        pMIN_PEAK => pBlock%getReal("MIN_PEAK")
+        call assert(pMIN_PEAK(1) > rNEAR_TINY, &
+          "No value was supplied for MIN_PEAK in block starting at line" &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        call assert(pMIN_PEAK(1) > rZERO, &
+          "Value supplied for MIN_PEAK must be greater than zero in block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        rMIN_PEAK = pMIN_PEAK(1)
+
+        pRISE_LAG => pBlock%getReal("RISE_LAG")
+        call assert(pRISE_LAG(1) > rNEAR_TINY, &
+          "No value was supplied for RISE_LAG in block starting at line" &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        call assert(pRISE_LAG(1) > rZERO, &
+          "Value supplied for RISE_LAG must be greater than zero in block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        rRISE_LAG = pRISE_LAG(1)
+
+        pFALL_LAG => pBlock%getReal("FALL_LAG")
+        call assert(pFALL_LAG(1) > rNEAR_TINY, &
+          "No value was supplied for FALL_LAG in block starting at line" &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        call assert(pFALL_LAG(1) > rZERO, &
+          "Value supplied for FALL_LAG must be greater than zero in block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), &
+            trim(__FILE__), __LINE__)
+        rFALL_LAG = pFALL_LAG(1)
+
+        deallocate(pWINDOW, pMIN_PEAK, pRISE_LAG, pFALL_LAG, pNEW_SERIES_NAME)
+
+      else
+
+        rWINDOW = 7.
+        sNewSeriesName = trim(this%sSeriesName)//"_hp"
+        rMIN_PEAK = median(this%tData%rValue) * 3.0
+        rRISE_LAG = 3.
+        rFALL_LAG = 5.
+
+      endif
+
+      allocate(lSelect(size(this%tData)), stat=iStat )
+      call assert(iStat == 0, "Problem allocating memory for series in while " &
+         //"processing HYDRO_PEAKS block", trim(__FILE__), __LINE__)
+
+      ! pare down current data set based on user inputs DATE_1 and DATE_2
+      iCount = this%selectByDate(tStartDate, tEndDate)
+      lSelect = lFALSE
+
+      ! initialize variables needed to perform comparisons
+      iLastIndex = 1
+      rLastValue = this%tData(1)%rValue
+      tLastDate = this%tData(1)%tDT
+
+      do i=1, size(this%tData)
+
+        ! if this element is not selected (i.e. within selected date range)
+        ! jump to next iteration of loop
+        if( .not. this%tData(i)%lSelect ) cycle
+
+        ! OK, now reset lSelect in preparation for peak identification
+        this%tData(i)%lSelect = lFALSE
+
+        ! cannot evaluate slopes at either end of the time series
+        if(i == 1) cycle
+        if(i == size(this%tData) ) cycle
+
+        ! if we're dealing with a peak, iSlope1 will be positive while
+        ! iSlope2 is negative
+        iSlope1 = ( this%tData(i)%rValue - this%tData(i-1)%rValue ) &
+                     / ( this%tData(i)%tDT - this%tData(i-1)%tDT )
+        iSlope2 = ( this%tData(i+1)%rValue - this%tData(i)%rValue ) &
+                     / ( this%tData(i+1)%tDT - this%tData(i)%tDT )
+        if( iSlope1 > rZERO ) then
+          if(iSlope2 < rZERO) then
+            ! we're found a potential peak; are we outside the time window
+            ! required in order to identify a new peak?
+            if((this%tData(i)%tDT - tLastDate ) > rWINDOW ) then
+              ! OK, the timing seems right; is the value of the discharge
+              ! sufficient to qualify as a peak?
+              if( this%tData(i)%rValue > rMIN_PEAK ) then
+                ! identify this point as a peak
+                lSelect(i) = lTRUE
+                tLastDate = this%tData(i)%tDT
+                rLastValue = this%tData(i)%rValue
+                iLastIndex = i
+              endif
+            else
+              ! we're within the time window (shadow?) of a previously identified peak
+              ! is the peak we identified still the largest value?
+              if( this%tData(i)%rValue > rLastValue ) then
+                ! we've met all the criteria above, but THIS is an EVEN BIGGER
+                ! peak value; we'll now redefine our definition of the peak value
+                ! first we reset the old peak value
+                this%tData(iLastIndex)%lSelect = lFALSE
+                iLastIndex = i
+                ! set the new peak value parameters
+                lSelect(i) = lTRUE
+                tLastDate = this%tData(i)%tDT
+                rLastValue = this%tData(i)%rValue
+              endif
+            endif
+          endif
+        endif
+      enddo
+
+      iCount = count(lSelect)
+      call echolog("Identified "//trim(asChar(iCount) )//" peaks in series " &
+        //quote(this%sSeriesName) )
+
+      ! clear the selection flags in preparation for identification of the
+      ! values preceding and following the peak values
+      call this%reset()
+
+      do i=2, size(this%tData) - 1
+        ! if this element is not selected, jump to next iteration of loop
+
+        if( .not. lSelect(i)) cycle
+
+        ! if we identified a peak in the previous step, we proceed
+        tCurrentDate = this%tData(i)%tDT
+
+        ! for each identified date, we select the date range associated with
+        ! the rise lag and fall lag, marking the elements for inclusion
+        ! in the final output series
+        iCount = this%selectByDate(GE = tCurrentDate%decrement(rRISE_LAG), &
+                                   LE = tCurrentDate%increment(rFALL_LAG), &
+                                   keep = lTRUE)
+     enddo
+
+     allocate(pTempSeries, stat=iStat )
+     call assert(iStat == 0, "Problem allocating memory for series in while " &
+       //"processing HYDRO_PEAKS block", trim(__FILE__), __LINE__)
+
+     allocate(pTempSeries%tData( count(this%tData%lSelect) ), stat=iStat )
+     call assert(iStat == 0, "Problem allocating memory for series in while " &
+       //"processing HYDRO_PEAKS block", trim(__FILE__), __LINE__)
+
+     ! now assign just those values associated with the peaks to the new series
+     pTempSeries%tData%rValue = pack(this%tData%rValue, this%tData%lSelect)
+     pTempSeries%tData%tDT = pack(this%tData%tDT, this%tData%lSelect)
+     pTempSeries%sDescription = trim(this%sDescription)//"; processed by HYDRO_PEAKS"
+     pTempSeries%tStartDate = this%tStartDate
+     pTempSeries%tEndDate = this%tEndDate
+     pTempSeries%sSeriesName = trim(sNewSeriesName)
+
+  end function find_hydro_events_fn
 
 !------------------------------------------------------------------------------
 
@@ -1047,11 +1330,7 @@ contains
 
         endif
 
-
-
       enddo
-
-
 
   end function calculate_period_statistics_fn
 

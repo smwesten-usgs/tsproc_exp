@@ -154,20 +154,8 @@ module tsp_data_structures
    integer, public :: LU_DATA
    integer, public :: LU_STD_OUT = 6
 
-
-!  type T_USGS_NWIS_DAILY
-!    integer (kind=T_INT) :: iWaterYear
-!    type (T_DATETIME) :: tDT
-!    real (kind=T_SGL) :: rMeanDischarge
-!    character (len=10) :: sDataFlag
-!  end type T_USGS_NWIS_DAILY
-!
-!  type T_USGS_NWIS_GAGE
-!    character (len=256) :: sAgencyCode
-!    character (len=256) :: sSiteNumber
-!    character (len=256) :: sDescription
-!    type (T_USGS_NWIS_DAILY), dimension(:), allocatable :: pGageData
-!  end type T_USGS_NWIS_GAGE
+   character (len=256), public :: sMostRecentListOutputFile = "none"
+   character (len=256), public :: sMostRecentInstructionFile = "none"
 
 
 contains

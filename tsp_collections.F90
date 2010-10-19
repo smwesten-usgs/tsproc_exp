@@ -28,26 +28,30 @@ module tsp_collections
   type TIME_SERIES_COLLECTION
     integer (kind=T_INT) :: iNumTimeSeries  = 0
     integer (kind=T_INT) :: iNumTables      = 0
+    integer (kind=T_INT) :: iNumTSComparisons = 0
+    integer (kind=T_INT) :: iNumTableComparisons = 0
 
-    type (T_TIME_SERIES), dimension(:), allocatable :: tTS
+    type (T_TIME_SERIES), dimension(:), pointer :: pTS => null()
+    type (T_TIME_SERIES), pointer :: pTSm => null()
     type (T_TS_COMPARISON), dimension(:), allocatable :: tTSComparison
     type (T_TABLE), dimension(:), allocatable :: tTable
     type (T_TABLE_COMPARISON), dimension(:), allocatable :: tTableComparison
 
   contains
 
-    procedure :: add_ts_sub, add_table_sub
+!    procedure :: add_ts_sub, add_table_sub
+    procedure :: add_ts_link_sub, add_table_sub
     procedure :: tsCompare => add_ts_comparison_sub
     procedure :: tableCompare => add_table_comparison_sub
-    generic :: add => add_ts_sub, add_table_sub
+    generic :: add => add_ts_link_sub, add_table_sub
     procedure :: clear => remove_all_sub
     procedure :: calculate => calc_values_from_equation_fn
     procedure :: newTimeBase => conform_ts_sub
-    procedure :: removeTS => remove_ts_sub
+    procedure :: removeTS => remove_ts_link_sub
     procedure :: removeTable => remove_table_sub
     procedure :: summarize => summarize_sub
     procedure :: describe => describe_ts_sub
-    procedure :: getTS => get_ts_pointer_fn
+    procedure :: getTS => get_ts_pointer_link_fn
     procedure :: getTSComparison => get_ts_comparison_pointer_fn
     procedure :: getTableComparison => get_table_comparison_pointer_fn
     procedure :: getTable => get_table_pointer_fn
@@ -59,89 +63,149 @@ module tsp_collections
 
   end type TIME_SERIES_COLLECTION
 
-
 contains
 
-  subroutine add_ts_sub(this, tTS)
-
-    ! add tTS to the COLLECTION of time series objects (this)
+  subroutine add_ts_link_sub(this, pNewSeries)
 
     class(TIME_SERIES_COLLECTION) :: this
-    type(T_TIME_SERIES) ::  tTS
+    type(T_TIME_SERIES), pointer ::  pNewSeries
 
     ! [ LOCALS ]
-    type(T_TIME_SERIES), dimension(:), allocatable :: tTempTS
+    type(T_TIME_SERIES), pointer :: pCurrentTS => null()
     integer (kind=T_INT) :: iCount
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: i
 
-    if(allocated(this%tTS)) then
+    if(associated(this%pTSm)) then
+      pCurrentTS => this%pTSm
+      do
+        ! recurse through list until we come to the end of the line
+        if(associated(pCurrentTS%pNext) ) then
+          pCurrentTS => pCurrentTS%pNext
+          cycle
+        else
+          ! update forward-pointing and backward-pointing pointers
+          pCurrentTS%pNext => pNewSeries
+          pNewSeries%pPrevious => pCurrentTS
+          pNewSeries%pNext => null()
+          this%iNumTimeSeries = this%iNumTimeSeries + 1
+          call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
+            //"There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
+          call echolog("")
 
-      ! get the number of time series currently in time series container
-      iCount = size(this%tTS)
-
-      ! check to see whether this name has been used already
-      do i = 1,iCount
-        call Assert(.not. str_compare(this%tTS(i)%sSeriesName, tTS%sSeriesName), &
-         "Series name "//trim(tTS%sSeriesName)//" has already been used", &
-         trim(__FILE__), __LINE__)
-      end do
-
-      ! allocate memory for size of current TS
-      allocate(tTempTS(iCount),stat=iStat)
-      call Assert(iStat==0, "Unable to allocate temporary memory for time series", &
-        TRIM(__FILE__), __LINE__)
-
-      ! make a copy of all previous TS objects
-      tTempTS = this%tTS
-
-      ! deallocate TS objects collection
-      deallocate(this%tTS, stat=iStat)
-      call Assert(iStat==0, "Unable to deallocate memory for time series", &
-        TRIM(__FILE__), __LINE__)
-
-      ! allocate TS objects collection to include room for new object
-      allocate(this%tTS(iCount + 1), stat=iStat)
-      call Assert(iStat==0, "Unable to allocate memory for time series", &
-        TRIM(__FILE__), __LINE__)
-
-      this%tTS(1:iCount) = tTempTS
-
-      ! ensure that the minimum and maximum date range fields are populated
-      ! before adding the TS object to the collection
-!      call tTS%findDateMinAndMax()
-
-      this%tTS(iCount+1) = tTS
-      this%tTS(iCount+1)%tData = tTS%tData
-
-!      deallocate(this%tTS, stat=iStat)
-!      call Assert(iStat==0, "Unable to deallocate memory for time series", &
-!        TRIM(__FILE__), __LINE__)
-
-!      this%tTS => tTempTS
-
+          exit
+        endif
+      enddo
     else
+      this%pTSm => pNewSeries
+      this%pTSm%pNext => null()
+      this%pTSm%pPrevious => null()
+      this%iNumTimeSeries = this%iNumTimeSeries + 1
+      pCurrentTS => this%pTSm
 
-      allocate(this%tTS(1),stat=iStat)
-      call Assert(iStat==0, "Unable to allocate memory for time series", &
-        TRIM(__FILE__), __LINE__)
-
-      ! ensure that the minimum and maximum date range fields are populated
-      ! before adding the TS object to the collection
-!      call tTS%findDateMinAndMax()
-
-      this%tTS(1) = tTS
-
-      if(allocated(this%tTS(1)%tData)) deallocate(this%tTS(1)%tData)
-      allocate(this%tTS(1)%tData(size(tTS%tData)))
-
-      this%tTS(1)%tData = tTS%tData
+      call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
+        //"There is now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
+      call echolog("")
 
     endif
 
-    this%iNumTimeSeries = this%iNumTimeSeries + 1
+    nullify(pNewSeries)
+    nullify(pCurrentTS)
 
-  end subroutine add_ts_sub
+  end subroutine add_ts_link_sub
+
+!------------------------------------------------------------------------------
+
+!   subroutine add_ts_sub(this, pTS)
+!
+!     ! add tTS to the COLLECTION of time series objects (this)
+!
+!     class(TIME_SERIES_COLLECTION) :: this
+!     type(T_TIME_SERIES), pointer ::  pTS
+!
+!     ! [ LOCALS ]
+!     type(T_TIME_SERIES), dimension(:), pointer :: pTempTS
+!     integer (kind=T_INT) :: iCount
+!     integer (kind=T_INT) :: iStat
+!     integer (kind=T_INT) :: i
+!
+!     print *, "ENTERED the ADD_TS_SUB"
+!
+!     if(associated(this%pTS)) then
+!
+!       ! get the number of time series currently in time series container
+!       iCount = size(this%pTS)
+!
+!       print *, "iCount = ",iCount
+!       ! check to see whether this name has been used already
+!       do i = 1,iCount
+!         print *, quote(this%pTS(i)%sSeriesName)
+!         call Assert(.not. str_compare(this%pTS(i)%sSeriesName, pTS%sSeriesName), &
+!          "Series name "//trim(pTS%sSeriesName)//" has already been used", &
+!          trim(__FILE__), __LINE__)
+!       end do
+!
+! !      ! allocate memory for size of current TS + 1
+!       allocate(pTempTS(iCount + 1),stat=iStat)
+!       call Assert(iStat==0, "Unable to allocate temporary memory for time series", &
+!         TRIM(__FILE__), __LINE__)
+!
+!       ! copy current TS objects
+!       pTempTS = this%pTS
+!       pTempTS%tData = this%pTS%tData
+!
+!       ! deallocate TS objects collection
+!       deallocate(this%pTS, stat=iStat)
+!       call Assert(iStat==0, "Unable to deallocate memory for time series", &
+!         TRIM(__FILE__), __LINE__)
+!
+!       move_alloc(pTempTS, this%pTS)
+!
+!       ! allocate TS objects collection to include room for new object
+! !      allocate(this%pTS(iCount + 1), stat=iStat)
+! !      call Assert(iStat==0, "Unable to allocate memory for time series", &
+! !        TRIM(__FILE__), __LINE__)
+!
+! !      this%pTS(1:iCount) = pTempTS
+! !      this%pTS(1:iCount)%pData = tTempTS(1:iCount)%pData
+!
+!       ! ensure that the minimum and maximum date range fields are populated
+!       ! before adding the TS object to the collection
+! !      call tTS%findDateMinAndMax()
+!
+!       this%pTS(iCount+1) = pTS
+!       this%pTS(iCount+1)%tData = pTS%tData
+!
+! !      deallocate(this%pTS, stat=iStat)
+! !      call Assert(iStat==0, "Unable to deallocate memory for time series", &
+! !        TRIM(__FILE__), __LINE__)
+!
+! !      this%pTS => tTempTS
+!
+!     else
+!
+!       allocate(this%pTS(1),stat=iStat)
+!       call Assert(iStat==0, "Unable to allocate memory for time series", &
+!         TRIM(__FILE__), __LINE__)
+!
+!       ! ensure that the minimum and maximum date range fields are populated
+!       ! before adding the TS object to the collection
+! !      call tTS%findDateMinAndMax()
+!
+!       this%pTS = pTS
+!
+! !      if(associated(this%pTS(1)%pData)) deallocate(this%pTS(1)%pData)
+! !      allocate(this%pTS(1)%pData(size(tTS%pData)))
+!
+!       this%pTS(1)%tData = pTS%tData
+!
+!     endif
+!
+!     this%iNumTimeSeries = this%iNumTimeSeries + 1
+!
+!     nullify(pTS)
+!
+!   end subroutine add_ts_sub
 
 !------------------------------------------------------------------------------
 
@@ -213,6 +277,96 @@ contains
 
 !------------------------------------------------------------------------------
 
+  subroutine remove_ts_link_sub(this, sSeriesName)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sSeriesName
+
+    ! [ LOCALS ]
+    type(T_TIME_SERIES), pointer :: pCurrent
+    type(T_TIME_SERIES), pointer :: pPrevious
+    type(T_TIME_SERIES), pointer :: pNext
+    logical (kind=T_LOGICAL) :: lMatch
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i
+
+    lMatch = lFALSE
+
+    if(associated(this%pTSm)) then
+
+      ! start at head of linked list
+      pCurrent => this%pTSm
+      do
+
+        if(.not. associated(pCurrent) ) then
+          exit
+
+        elseif(str_compare(pCurrent%sSeriesName, sSeriesName) ) then
+
+        print *, quote(pCurrent%sSeriesName)
+        print *, "  pPrevious: ", associated(pCurrent%pPrevious)
+        print *, "  pNext: ", associated(pCurrent%pNext)
+
+          ! reset pointers away/around object to be deleted
+          pPrevious => pCurrent%pPrevious
+          if(associated(pPrevious)) then
+            pPrevious%pNext => pCurrent%pNext
+          else
+            ! if the pPrevious pointer is null, it means we're at the
+            ! head of the list; need to redefine the head of the list
+            ! within the TS data structure
+            this%pTSm => pCurrent%pNext
+          endif
+
+          pNext => pCurrent%pNext
+          if(associated(pNext)) pNext%pPrevious => pCurrent%pPrevious
+          deallocate(pCurrent%tData, stat=iStat)
+          call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
+            trim(__FILE__), __LINE__)
+          deallocate(pCurrent)
+          lMatch = lTRUE
+          this%iNumTimeSeries = this%iNumTimeSeries - 1
+
+          call echolog("Removed series "//quote(sSeriesName)//". " &
+            //trim(asChar(this%iNumTimeSeries))//" series remaining.")
+
+          exit
+        else
+          pCurrent => pCurrent%pNext
+        endif
+      enddo
+
+      call warn(lMatch, "Unable to find series "//quote(sSeriesName)//" for removal", &
+        trim(__FILE__), __LINE__)
+    else
+      call warn(lFALSE,"There are no series objects in memory. Unable to remove series " &
+        //quote(sSeriesName), trim(__FILE__), __LINE__)
+    endif
+
+
+    print *
+
+        pCurrent => this%pTSm
+
+      if(associated(pCurrent)) then
+        do
+
+          print *, quote(pCurrent%sSeriesName)
+          print *, "  pPrevious: ", associated(pCurrent%pPrevious)
+          print *, "  pNext: ", associated(pCurrent%pNext)
+
+          if(.not. associated(pCurrent%pNext) ) then
+            exit
+          else
+            pCurrent => pCurrent%pNext
+          endif
+        enddo
+      endif
+
+  end subroutine remove_ts_link_sub
+
+!------------------------------------------------------------------------------
+
   subroutine remove_ts_sub(this, sSeriesName)
 
     ! remove tTS from a COLLECTION of time series objects (this)
@@ -221,23 +375,23 @@ contains
     character (len=*) :: sSeriesName
 
     ! [ LOCALS ]
-    type(T_TIME_SERIES), dimension(:), allocatable :: pTempTS
+    type(T_TIME_SERIES), dimension(:), pointer :: pTempTS
     integer (kind=T_INT) :: iCount
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: i, j
     logical (kind=T_LOGICAL) :: lMatch
 
-    if(allocated(this%tTS)) then
+    if(associated(this%pTS)) then
 
       ! get the number of time series currently in time series container
-      iCount = size(this%tTS)
+      iCount = size(this%pTS)
 
 !      print *, "iCount: ", iCount
 
       ! check to see whether a time series with this name exists
       lMatch = lFALSE
       do i = 1,iCount
-        if(str_compare(this%tTS(i)%sSeriesName, sSeriesName)) then
+        if(str_compare(this%pTS(i)%sSeriesName, sSeriesName)) then
           lMatch = lTRUE
           exit
         endif
@@ -256,38 +410,38 @@ contains
       ! make a copy of objects we wish to keep
       do i = 1,iCount
 !        print *, "#:",i
-        if(str_compare(this%tTS(i)%sSeriesName, sSeriesName)) cycle
+        if(str_compare(this%pTS(i)%sSeriesName, sSeriesName)) cycle
         j = j + 1
-        pTempTS(j) = this%tTS(i)
-!        print *, i, "keeping "//trim(this%tTS(i)%sSeriesname)
+        pTempTS(j) = this%pTS(i)
+!        print *, i, "keeping "//trim(this%pTS(i)%sSeriesname)
       enddo
 
       ! deallocate TS objects collection
-      do i=1,size(this%tTS)
-        deallocate( this%tTS(i)%tData, stat=iStat )
+      do i=1,size(this%pTS)
+        deallocate( this%pTS(i)%tData, stat=iStat )
       enddo
       call Assert(iStat==0, "Unable to deallocate memory for time series data", &
         TRIM(__FILE__), __LINE__)
 
-      deallocate(this%tTS, stat=iStat)
+      deallocate(this%pTS, stat=iStat)
       call Assert(iStat==0, "Unable to deallocate memory for time series", &
         TRIM(__FILE__), __LINE__)
 
 
       ! allocate TS objects collection to include room for new object
-      allocate(this%tTS(iCount - 1), stat=iStat)
+      allocate(this%pTS(iCount - 1), stat=iStat)
       call Assert(iStat==0, "Unable to allocate memory for time series", &
         TRIM(__FILE__), __LINE__)
 
-      this%tTS = pTempTS
+      this%pTS = pTempTS
       this%iNumTimeSeries = this%iNumTimeSeries - 1
 
 
-!      deallocate(this%tTS, stat=iStat)
+!      deallocate(this%pTS, stat=iStat)
 !      call Assert(iStat==0, "Unable to deallocate memory for time series", &
 !        TRIM(__FILE__), __LINE__)
 
-!      this%tTS => pTempTS
+!      this%pTS => pTempTS
 
       call writelog("  <deleted time series "//quote(sSeriesName)//">")
 
@@ -398,12 +552,12 @@ contains
     integer (kind=T_INT) :: iDataSize ! holds size of associated data structures
     integer (kind=T_INT) :: i         ! loop counter
 
-    if(allocated(this%tTS)) then
-      iSize = size(this%tTS)
+    if(associated(this%pTS)) then
+      iSize = size(this%pTS)
       do i=1,iSize
-        if(allocated(this%tTS(i)%tData)) deallocate(this%tTS(i)%tData)
+        if(allocated(this%pTS(i)%tData)) deallocate(this%pTS(i)%tData)
       enddo
-      deallocate(this%tTS)
+      deallocate(this%pTS)
     endif
 
     if(allocated(this%tTable)) then
@@ -431,24 +585,24 @@ contains
     integer (kind=T_INT) :: i, j
     logical (kind=T_LOGICAL) :: lMatch
 
-    if(allocated(this%tTS)) then
+    if(associated(this%pTS)) then
 
       ! get the number of time series currently in time series container
-      iCount = size(this%tTS)
+      iCount = size(this%pTS)
 
-      ! check to see whether this name has been used already
+      ! scan to find a series with this name
       lMatch = lFALSE
       do i = 1,iCount
-        if(str_compare(this%tTS(i)%sSeriesName, sSeriesName)) then
+        if(str_compare(this%pTS(i)%sSeriesName, sSeriesName)) then
           lMatch = lTRUE
           exit
         endif
       end do
 
-      call Assert(lMatch, "No time series with the name "//trim(sSeriesName)// &
+      call Assert(lMatch, "No time series with the name "//quote(sSeriesName)// &
          " could be found",trim(__FILE__),__LINE__)
 
-      pTS => this%tTS(i)
+      pTS => this%pTS(i)
 
     endif
 
@@ -456,13 +610,63 @@ contains
 
 !------------------------------------------------------------------------------
 
-  function get_ts_comparison_pointer_fn(this, sObservedSeries, sModeledSeries)    result( pTSComparison )
+  function get_ts_pointer_link_fn(this, sSeriesName)    result( pTS )
+
+    ! get values associated with tTS from a COLLECTION of time series objects (this)
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sSeriesName
+    type(T_TIME_SERIES), pointer :: pTS
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iCount
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i, j
+    logical (kind=T_LOGICAL) :: lMatch
+    type(T_TIME_SERIES), pointer :: pCurrent => null()
+
+    lMatch = lFALSE
+
+    if(associated(this%pTSm)) then
+
+      ! start at head of linked list
+      pCurrent => this%pTSm
+      do
+        if(.not. associated(pCurrent) ) exit
+
+        if(str_compare(pCurrent%sSeriesName, sSeriesName) ) then
+          lMatch = lTRUE
+          pTS => pCurrent
+          exit
+        elseif(.not. associated(pCurrent%pNext) ) then
+          exit
+        else
+          pCurrent => pCurrent%pNext
+        endif
+      enddo
+
+      call warn(lMatch, "Unable to find series "//quote(sSeriesName)//".", &
+        trim(__FILE__), __LINE__)
+    else
+      call warn(lFALSE,"There are no series objects in memory. Unable to obtain pointer to series " &
+        //quote(sSeriesName), trim(__FILE__), __LINE__)
+
+      pTS => null()
+
+    endif
+
+    nullify(pCurrent)
+
+  end function get_ts_pointer_link_fn
+
+!------------------------------------------------------------------------------
+
+  function get_ts_comparison_pointer_fn(this, sObservedSeries, sModeledSeries)    result( tTSComparison )
 
     ! get values associated with tTS from a COLLECTION of time series objects (this)
     class(TIME_SERIES_COLLECTION) :: this
     character (len=*) :: sObservedSeries
     character (len=*) :: sModeledSeries
-    type(T_TS_COMPARISON), pointer :: pTSComparison
+    type(T_TS_COMPARISON), pointer :: tTSComparison
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: iCount
@@ -485,10 +689,11 @@ contains
         endif
       end do
 
-      call Assert(lMatch, "No time series comparison between the series "//trim(sObservedSeries)// &
-         " and "//trim(sModeledSeries)//" could be found",trim(__FILE__),__LINE__)
+      call Assert(lMatch, "No time series comparison between the series "//quote(sObservedSeries)// &
+         " and "//quote(sModeledSeries)//" could be found",trim(__FILE__),__LINE__)
 
-      pTSComparison => this%tTSComparison(i)
+!      tTSComparison => this%tTSComparison(i)
+      tTSComparison => null()
 
     endif
 
@@ -526,10 +731,11 @@ contains
         endif
       end do
 
-      call Assert(lMatch, "No table comparisons between the series "//trim(sObservedTable)// &
-         " and "//trim(sModeledTable)//" could be found",trim(__FILE__),__LINE__)
+      call Assert(lMatch, "No table comparisons between the series "//quote(sObservedTable)// &
+         " and "//quote(sModeledTable)//" could be found",trim(__FILE__),__LINE__)
 
-      pTableComparison => this%tTableComparison(i)
+!      pTableComparison => this%tTableComparison(i)
+      pTableComparison => null()
 
     endif
 
@@ -564,10 +770,11 @@ contains
         endif
       end do
 
-      call Assert(lMatch, "No table with the name "//trim(sSeriesName)// &
+      call Assert(lMatch, "No table with the name "//quote(sSeriesName)// &
          " could be found",trim(__FILE__),__LINE__)
 
-      pTable => this%tTable(i)
+!      pTable => this%tTable(i)
+      pTable => null()
 
     endif
 
@@ -585,41 +792,81 @@ contains
     integer (kind=T_INT) :: iMemoryInBytes
     integer (kind=T_INT) :: iSum
     real (kind=T_SGL) :: rSSE
-    type (T_TIME_SERIES), pointer :: pObservedSeries, pModeledSeries
-    type (T_TABLE), pointer :: pObservedTable, pModeledTable
+    type (T_TIME_SERIES), pointer :: pObservedSeries => null()
+    type (T_TIME_SERIES), pointer :: pModeledSeries => null()
+    type(T_TIME_SERIES), pointer :: pCurrentTS => null()
+    type (T_TABLE), pointer :: pObservedTable => null()
+    type (T_TABLE), pointer :: pModeledTable => null()
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
       fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
            t80,'MAX',t86,'MEMORY(kb)',/)")
 
-    if(.not. allocated(this%tTS)) then
+    if(associated(this%pTSm)) then
+
+      pCurrentTS => this%pTSm
+
+      do
+
+        if(allocated(pCurrentTS%tData)) then
+          iMemoryInBytes = sizeof(pCurrentTS) + sizeof(pCurrentTS%tData)
+          write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
+            pCurrentTS%sSeriesName, &
+            pCurrentTS%tStartDate%prettyDate(), &
+            pCurrentTS%tEndDate%prettyDate(), &
+            size(pCurrentTS%tData), &
+            MINVAL(pCurrentTS%tData%rValue), &
+            SUM(pCurrentTS%tData%rValue)/ size(pCurrentTS%tData), &
+            MAXVAL(pCurrentTS%tData%rValue), &
+            iMemoryInBytes / 1024
+            iSum = iSum + size(pCurrentTS%tData)
+        else
+          iMemoryInBytes = sizeof(pCurrentTS)
+
+          write(LU_STD_OUT,fmt="(a,t20,51x,i6,'k')") &
+            pCurrentTS%sSeriesName, iMemoryInBytes / 1024
+
+        endif
+
+        ! recurse through list until we come to the end of the line
+        if(associated(pCurrentTS%pNext) ) then
+          pCurrentTS => pCurrentTS%pNext
+          cycle
+        else
+          exit
+        endif
+      enddo
+
+    endif
+
+    if(.not. associated(this%pTS)) then
       write(LU_STD_OUT,fmt="(a,/)") '     ===> No TIME SERIES objects currently in memory <==='
 
     else
 
-      iCount = size(this%tTS)
+      iCount = size(this%pTS)
 
       iSum = 0
       do i=1,iCount
 
-        if(allocated(this%tTS(i)%tData)) then
-          iMemoryInBytes = sizeof(this%tTS(i)) + sizeof(this%tTS(i)%tData)
+        if(allocated(this%pTS(i)%tData)) then
+          iMemoryInBytes = sizeof(this%pTS(i)) + sizeof(this%pTS(i)%tData)
           write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
-            this%tTS(i)%sSeriesName, &
-            this%tTS(i)%tStartDate%prettyDate(), &
-            this%tTS(i)%tEndDate%prettyDate(), &
-            size(this%tTS(i)%tData), &
-            MINVAL(this%tTS(i)%tData%rValue), &
-            SUM(this%tTS(i)%tData%rValue)/ size(this%tTS(i)%tData), &
-            MAXVAL(this%tTS(i)%tData%rValue), &
+            this%pTS(i)%sSeriesName, &
+            this%pTS(i)%tStartDate%prettyDate(), &
+            this%pTS(i)%tEndDate%prettyDate(), &
+            size(this%pTS(i)%tData), &
+            MINVAL(this%pTS(i)%tData%rValue), &
+            SUM(this%pTS(i)%tData%rValue)/ size(this%pTS(i)%tData), &
+            MAXVAL(this%pTS(i)%tData%rValue), &
             iMemoryInBytes / 1024
-            iSum = iSum + size(this%tTS(i)%tData)
+            iSum = iSum + size(this%pTS(i)%tData)
         else
-          iMemoryInBytes = sizeof(this%tTS(i))
+          iMemoryInBytes = sizeof(this%pTS(i))
 
           write(LU_STD_OUT,fmt="(a,t20,51x,i6,'k')") &
-            this%tTS(i)%sSeriesName, iMemoryInBytes / 1024
+            this%pTS(i)%sSeriesName, iMemoryInBytes / 1024
 
         endif
       end do
@@ -658,10 +905,11 @@ contains
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE COMPARISON OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
-      fmt="('OBSERVED SERIES    MODELED SERIES          DATE RANGE    COUNT    RESIDUAL')")
+      fmt="(/,'OBSERVED SERIES',t19,'MODELED SERIES',t38,'DATE RANGE',t60,'COUNT'," &
+         //"t76,'RESIDUAL',/)")
 
     if(.not. allocated(this%tTSComparison)) then
-      write(LU_STD_OUT,fmt="(a,/)") &
+      write(LU_STD_OUT,fmt="(a)") &
         '     ===> No TIME SERIES COMPARISON objects currently in memory <==='
 
     else
@@ -693,7 +941,8 @@ contains
     endif
 
     write(LU_STD_OUT, &
-      fmt="('OBSERVED TABLE    MODELED TABLE          DATE RANGE    COUNT    RESIDUAL')")
+      fmt="(/,'OBSERVED TABLE',t19,'MODELED TABLE',t38,'DATE RANGE',t60,'COUNT'," &
+         //"t76,'RESIDUAL',/)")
     if(.not. allocated(this%tTableComparison)) then
       write(LU_STD_OUT,fmt="(a,/)") &
         '     ===> No TABLE COMPARISON objects currently in memory <==='
@@ -708,14 +957,33 @@ contains
         pModeledTable => this%getTable(this%tTableComparison(i)%sModeledTable)
         rSSE = 0.
 
-        do j=1,size(pObservedTable%tTableData%sValue)
+        if(pObservedTable%iTableType == iETABLE) then
 
+          ! calculate SSE using the third element of "sValue" (i.e. fraction of days exceeded)
+          do j=1,size(pObservedTable%tTableData)
+            rSSE = rSSE + (( asReal(pObservedTable%tTableData(j)%sValue(3)) &
+                   - asReal(pModeledTable%tTableData(j)%sValue(3)) ) **2 &
+                   * this%tTableComparison(i)%rWeightValue(j)**2)
+          enddo
 
-          rSSE = rSSE + (( asReal(pObservedTable%tTableData(j)%sValue) &
-                 - asReal(pModeledTable%tTableData(j)%sValue) ) **2 &
-                 * this%tTableComparison(i)%rWeightValue(j)**2)
+        elseif(pObservedTable%iTableType == iSTABLE) then
 
-        enddo
+          ! ignore the first 8 entries of the S table in calculating SSE
+          do j=9,size(pObservedTable%tTableData)
+            rSSE = rSSE + (( asReal(pObservedTable%tTableData(j)%sValue(1)) &
+                   - asReal(pModeledTable%tTableData(j)%sValue(1)) ) **2 &
+                   * this%tTableComparison(i)%rWeightValue(j)**2)
+          enddo
+
+        else
+
+          do j=1,size(pObservedTable%tTableData)
+            rSSE = rSSE + (( asReal(pObservedTable%tTableData(j)%sValue(1)) &
+                   - asReal(pModeledTable%tTableData(j)%sValue(1)) ) **2 &
+                   * this%tTableComparison(i)%rWeightValue(j)**2)
+          enddo
+
+        endif
 
         write(LU_STD_OUT,fmt="(a18,1x,a18,1x,a10,'-',a10, i10, g16.8)") &
           this%tTableComparison(i)%sObservedTable, &
@@ -744,14 +1012,14 @@ contains
 
     pTS => this%getTS(sSeriesName)
 
-    write(LU_STD_OUT,fmt="(a)") trim(pTS%sDescription)
+    write(LU_STD_OUT,fmt="(/,a,/)") trim(pTS%sDescription)
 
     if(allocated(pTS%tData)) then
     write(LU_STD_OUT, &
       fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
            t80,'MAX',t86,'MEMORY(kb)')")
       iMemoryInBytes = sizeof(pTS) + sizeof(pTS%tData)
-      write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
+      write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k',/)") &
         pTS%sSeriesName, &
         pTS%tStartDate%prettyDate(), &
         pTS%tEndDate%prettyDate(), &
@@ -780,7 +1048,7 @@ contains
     integer (kind=T_INT), optional :: iLU
 
     ! [ LOCALS ]
-    type(T_TS_COMPARISON), pointer :: pTSComparison
+    type(T_TS_COMPARISON), pointer :: tTSComparison
     type(T_TIME_SERIES), pointer :: pObservedSeries
     integer (kind=T_INT) :: LU
     character (len=256) :: sFormatString
@@ -792,7 +1060,7 @@ contains
       LU = LU_STD_OUT
     endif
 
-    pTSComparison => this%getTSComparison(sObservedSeries, sModeledSeries)
+    tTSComparison => this%getTSComparison(sObservedSeries, sModeledSeries)
     pObservedSeries => this%getTS(sObservedSeries)
 
     sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,g16.8,3x,g16.8,3x,a)"
@@ -802,12 +1070,12 @@ contains
 
        write(LU,fmt=trim(sFormatString)) &
           trim(pObservedSeries%sSeriesName)//"_"//trim(asChar(i) ), &
-          pObservedSeries%tData(i)%rValue, pTSComparison%rWeightValue(i), &
-          pTSComparison%sObservedSeries
+          pObservedSeries%tData(i)%rValue, tTSComparison%rWeightValue(i), &
+          tTSComparison%sObservedSeries
 
     enddo
 
-    nullify(pTSComparison, pObservedSeries)
+    nullify(tTSComparison, pObservedSeries)
 
   end subroutine pest_write_ts_comparison_sub
 
@@ -928,18 +1196,25 @@ contains
   subroutine conform_ts_sub(this, sSeriesname, sTimeBaseName, sNewSeriesName)
 
     class(TIME_SERIES_COLLECTION) :: this
-    character(len=*), intent(in) :: sSeriesName
-    character(len=*), intent(in) :: sTimeBaseName
-    character(len=*), intent(in), optional :: sNewSeriesName
+    character(len=256), intent(in) :: sSeriesName
+    character(len=256), intent(in) :: sTimeBaseName
+    character(len=256), intent(in), optional :: sNewSeriesName
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTS, pTimeBaseTS
-    type (T_TIME_SERIES) :: tNewSeries
+    type (T_TIME_SERIES), pointer :: pNewSeries
+    type (T_TIME_SERIES), allocatable, target :: pTempSeries
+    integer (kind=T_INT) :: iStat
 
     real (kind=T_SGL), dimension(:), allocatable :: rX1, rX2, rY1, rY2
     real (kind=T_DBL) :: rOffset
 
    character (len=256) :: sNewName
+
+   call Assert(len_trim(sSeriesname) > 0, &
+     "internal error: must provide 'sSeriesname'", trim(__FILE__),__LINE__)
+   call Assert(len_trim(sTimeBasename) > 0, &
+     "internal error: must provide 'sSeriesname'", trim(__FILE__),__LINE__)
 
    ! create a new series name if one is not provided
    if(present(sNewSeriesName)) then
@@ -962,43 +1237,62 @@ contains
        //trim(sTimeBaseName)//") used to define the new time base", &
        trim(__FILE__), __LINE__)
 
-    allocate(tNewSeries%tData(size(pTimeBaseTS%tData)))
+    allocate(pTempSeries, stat=iStat)
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+      trim(__FILE__), __LINE__)
 
-    tNewSeries%sSeriesname = sNewName
-    tNewSeries%sDescription = "Data from series "//trim(pTS%sSeriesName)//", " &
+    allocate(pTempSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+      trim(__FILE__), __LINE__)
+
+    pTempSeries%sSeriesname = sNewName
+    pTempSeries%sDescription = "Data from series "//trim(pTS%sSeriesName)//", " &
       //"interpolated to the datetimes found in series "//trim(pTimeBaseTS%sSeriesName)
 
-    allocate(rX1(size(pTS%tData)))
-    allocate(rY1(size(pTS%tData)))
+    allocate(rX1(size(pTS%tData)),stat=iStat)
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+      trim(__FILE__), __LINE__)
 
-    allocate(rX2(size(pTimeBaseTS%tData)))
-    allocate(rY2(size(pTimeBaseTS%tData)))
+    allocate(rY1(size(pTS%tData)),stat=iStat)
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+      trim(__FILE__), __LINE__)
+
+    allocate(rX2(size(pTimeBaseTS%tData)),stat=iStat)
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+      trim(__FILE__), __LINE__)
+
+    allocate(rY2(size(pTimeBaseTS%tData)),stat=iStat)
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+      trim(__FILE__), __LINE__)
 
     ! we're subtracting this (large) value so that we can get away with using
     ! single precision real values to represent the datetime values
     rOffset = real(MINVAL(pTS%tData%tDT%iJulianDay), kind=T_DBL)
 
-
     rX1 = real( pTS%tData%tDT%iJulianDay, kind=T_DBL ) - rOffset &
            + real(pTS%tData%tDT%rFractionOfDay, kind=T_DBL)
+
     rY1 = pTS%tData%rValue
 
     rX2 = real( pTimeBaseTS%tData%tDT%iJulianDay, kind=T_DBL ) - rOffset &
            + real(pTimeBaseTS%tData%tDT%rFractionOfDay, kind=T_DBL)
 
+
     call interp_1d( rX1, rY1, rX2, rY2)
 
     ! copy datetime values from the timebase series to the new series
-    tNewSeries%tData%tDT = pTimeBaseTS%tData%tDT
+    pTempSeries%tData%tDT = pTimeBaseTS%tData%tDT
     ! copy the interpolated values to the new series
-    tNewSeries%tData%rValue = rY2
-
-    call tNewSeries%findDateMinAndMax()
-
+    pTempSeries%tData%rValue = rY2
+    call pTempSeries%findDateMinAndMax()
+    pNewSeries => pTempSeries
     ! add new series to collection of series
-    call this%add(tNewSeries)
 
+    call this%add(pNewSeries)
     deallocate(rX1, rY1, rX2, rY2)
+    nullify(pTS)
+    nullify(pTimeBaseTS)
+    nullify(pNewSeries)
 
   end subroutine conform_ts_sub
 
@@ -1059,7 +1353,7 @@ contains
     character(len=*), intent(in) :: sEquationText
 
     ! [ LOCALS ]
-    type(T_TS_COMPARISON), dimension(:), allocatable :: tTempTSComparison
+    type(T_TS_COMPARISON), dimension(:), allocatable :: tTemtTSComparison
     type (T_TIME_SERIES), pointer :: pObservedSeries, pModeledSeries
     integer (kind=T_INT) :: iCount
     integer (kind=T_INT) :: iCountObserved, iCountModeled
@@ -1130,13 +1424,13 @@ contains
 
           if( lIsNewComparison ) then
             ! allocate memory for size of current TSComparison object
-            allocate(tTempTSComparison(iCount),stat=iStat)
+            allocate(tTemtTSComparison(iCount),stat=iStat)
             call Assert(iStat==0, "Unable to allocate temporary memory for time " &
               //"series comparison object", &
               TRIM(__FILE__), __LINE__)
 
             ! make a copy of all previous TS objects
-            tTempTSComparison = this%tTSComparison
+            tTemtTSComparison = this%tTSComparison
 
             ! deallocate TS comparison objects collection
             deallocate(this%tTSComparison, stat=iStat)
@@ -1149,7 +1443,7 @@ contains
             call Assert(iStat==0, "Unable to allocate memory for time series comparison object", &
               TRIM(__FILE__), __LINE__)
 
-            this%tTSComparison(1:iCount) = tTempTSComparison
+            this%tTSComparison(1:iCount) = tTemtTSComparison
 
 !            this%tTSComparison(iCount + 1)%pObservedSeries => pObservedSeries
 !            this%tTSComparison(iCount + 1)%pModeledSeries => pModeledSeries
@@ -1210,6 +1504,12 @@ contains
     iCount = 0
 
     lIsNewComparison = lTRUE
+
+    ! ensure that we're about to compare tables of the same type
+    call Assert(pObservedTable%iTableType == pModeledTable%iTableType, &
+      "Cannot compare modeled table ("//quote(TABLE_TYPE(pModeledTable%iTableType)) &
+      //") to observed table ("//quote(TABLE_TYPE(pObservedTable%iTableType)), &
+      trim(__FILE__), __LINE__)
 
     do
 
@@ -1350,7 +1650,7 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
   do i=1,iNumFields
     call Chomp(sBuf, sVarTxt(i) , OPERATORS//" ")
 !    print *, "|"//sVarTxt(i)//"|"
-    if(isElement(sVarTxt(i), this%tTS%sSeriesName)) then
+    if(isElement(sVarTxt(i), this%pTS%sSeriesName)) then
       iNumSeries = iNumSeries + 1
       pTS => this%getTS( sVarTxt(i) )
       call TSCOL%add( pTS )
@@ -1383,10 +1683,10 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
       allocate(rTempValue( count(lInclude) ) )
 
       do i=1,iNumRecords
-        do j=1,size(TSCOL%tTS)
-          rTempValue(j) = TSCOL%tTS(j)%tData(i)%rValue
+        do j=1,size(TSCOL%pTS)
+          rTempValue(j) = TSCOL%pTS(j)%tData(i)%rValue
         enddo
-        rOut(i) = evaluate_expression (rTempValue , TSCOL%tTS(1)%tData(i)%tDT )
+        rOut(i) = evaluate_expression (rTempValue , TSCOL%pTS(1)%tData(i)%tDT )
       enddo
 
     else  ! no time series are referenced in equation text; modify calls accordingly

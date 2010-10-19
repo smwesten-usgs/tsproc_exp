@@ -23,6 +23,7 @@ module tsp_datetime_class
     procedure :: populate_julian_day_sub
     generic, public :: calcJulianDay => calc_julian_day_sub, &
                                            populate_julian_day_sub
+    procedure :: calcGregorianDate => calc_gregorian_date_sub
     procedure, public :: calcWaterYear => calc_water_year_sub
     procedure, public :: parseDate => parse_text_to_date_sub
     procedure, public :: parseTime => parse_text_to_time_sub
@@ -41,8 +42,10 @@ module tsp_datetime_class
     generic :: operator(<=) => is_date_LT_or_equal_to
     procedure :: is_date_equal_to
     generic :: operator(==) => is_date_equal_to
-    procedure :: date_subtract_fn
-    generic :: operator(-) => date_subtract_fn
+    procedure :: date_subtract => date_minus_date_fn
+    generic :: operator(-) => date_subtract
+    procedure :: increment => date_plus_real_fn
+    procedure :: decrement => date_minus_real_fn
 
     procedure, public :: prettydate => write_pretty_date_fn
     procedure, public :: listdatetime => write_list_datetime_fn
@@ -378,6 +381,42 @@ subroutine calc_julian_day_sub(this)
 
 end subroutine calc_julian_day_sub
 
+
+subroutine calc_gregorian_date_sub(this)
+
+  class (T_DATETIME) :: this
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iMonth
+  integer (kind=T_INT) :: iDay
+  integer (kind=T_INT) :: iYear
+  integer (kind=T_BYTE) :: iHour
+  integer (kind=T_BYTE) :: iMinute
+  integer (kind=T_BYTE) :: iSecond
+
+  real(kind=T_SGL) :: rHour, rMinute, rSecond
+
+  call gregorian_date(this%iJulianDay, iYear, iMonth, iDay)
+
+  this%iYear = int(iYear, kind=T_SHORT)
+  this%iMonth = int(iMonth, kind=T_BYTE)
+  this%iDay = int(iDay, kind=T_BYTE)
+
+  rHour = this%rFractionOfDay * 24_T_DBL
+  iHour = int(rHour, kind=T_BYTE)
+
+  rMinute = (rHour - real(iHour, kind=T_SGL) ) * 1440_T_DBL
+  iMinute = int(rMinute, kind=T_BYTE)
+
+  rSecond = ( rMinute - real(iMinute, kind=T_SGL) ) * 86400_T_DBL
+  iSecond = int(rSecond, kind=T_BYTE)
+
+  this%iHour = iHour
+  this%iMinute = iMinute
+  this%iHour = iSecond
+
+end subroutine calc_gregorian_date_sub
+
 !!***
 
 !--------------------------------------------------------------------------
@@ -622,20 +661,53 @@ end function is_date_equal_to
 
 !------------------------------------------------------------------------------
 
-function date_subtract_fn(date1, date2)  result(rDelta)
+function date_minus_date_fn(date1, date2)  result(rDelta)
 
   class(T_DATETIME), intent(in) :: date1
   class(T_DATETIME), intent(in) :: date2
-
-  ! [ LOCALS ]
   real (kind=T_DBL) :: rDelta
-
-!  rDelta = ( real(date1%iJulianDay, kind=T_DBL) + real(date1%rFractionOfDay, kind=T_DBL) ) &
-!     - ( real(date2%iJulianDay, kind=T_DBL) + real(date2%rFractionOfDay, kind=T_DBL) )
 
   rDelta = date1%getJulianDay() - date2%getJulianDay()
 
-end function date_subtract_fn
+end function date_minus_date_fn
+
+!------------------------------------------------------------------------------
+
+function date_minus_real_fn(this, rDays)  result(tResultDate)
+
+  class(T_DATETIME) :: this
+  real(kind=T_SGL), intent(in) :: rDays
+  type(T_DATETIME) :: tResultDate
+
+  ! [ LOCALS ]
+  real (kind=T_DBL) :: rJulianDay
+  integer (kind=T_INT) :: iMonth, iDay, iYear
+
+  rJulianDay = this%getJulianDay() - real(rDays, kind=T_DBL)
+  tResultDate%iJulianDay = int(rJulianDay)
+  tResultDate%rFractionOfDay = rJulianDay - real(tResultDate%iJulianDay, kind=T_DBL)
+  call tResultDate%calcGregorianDate()
+
+end function date_minus_real_fn
+
+!------------------------------------------------------------------------------
+
+function date_plus_real_fn(this, rDays)  result(tResultDate)
+
+  class(T_DATETIME) :: this
+  real(kind=T_SGL), intent(in) :: rDays
+  type(T_DATETIME) :: tResultDate
+
+  ! [ LOCALS ]
+  real (kind=T_DBL) :: rJulianDay
+  integer (kind=T_INT) :: iMonth, iDay, iYear
+
+  rJulianDay = this%getJulianDay() + real(rDays, kind=T_DBL)
+  tResultDate%iJulianDay = int(rJulianDay)
+  tResultDate%rFractionOfDay = rJulianDay - real(tResultDate%iJulianDay, kind=T_DBL)
+  call tResultDate%calcGregorianDate()
+
+end function date_plus_real_fn
 
 !------------------------------------------------------------------------------
 
@@ -905,6 +977,134 @@ function read_dates_file(sFilename)                           result(pDateRange)
   close(unit=LU_DATES)
 
 end function read_dates_file
+
+!------------------------------------------------------------------------------
+
+function make_monthly_dates_list_fn(tStartDate, tEndDate)       result(pDateRange)
+
+  implicit none
+
+  type (T_DATETIME), intent(in) :: tStartDate, tEndDate
+
+  type (T_DATERANGE), dimension(:), pointer :: pDateRange
+
+  ! [ LOCALS ]
+  type (T_DATETIME) :: tStartPeriod, tEndPeriod
+  integer (kind=T_INT) :: iStat, iSize, i, iNumMonths
+  character (len=256) :: sStartDate, sStartTime, sEndDate, sEndTime
+  integer (kind=T_INT) :: iMonth, iDay, iYear, iJD
+  integer (kind=T_INT) :: iStartMonth, iStartDay, iStartYear
+  integer (kind=T_INT) :: iEndMonth, iEndDay, iEndYear
+
+  iNumMonths = 0
+  call gregorian_date(tStartDate%iJulianDay, iStartYear, iStartMonth, iStartDay)
+
+  do iJD=tStartDate%iJulianDay, tEndDate%iJulianDay
+    call gregorian_date(iJD, iYear, iMonth, iDay)
+    if(iMonth /= iStartMonth) then
+      iNumMonths = iNumMonths + 1
+      iStartMonth = iMonth
+    endif
+  enddo
+
+  ! allow for one more month to account for partial month at end of range
+  iNumMonths = iNumMonths + 1
+
+  allocate(pDateRange(iNumMonths), stat = iStat)
+  call Assert(iStat == 0, "Problem allocating memory for date range data structure", &
+     trim(__FILE__), __LINE__)
+
+  iNumMonths = 0
+  call gregorian_date(tStartDate%iJulianDay, iStartYear, iStartMonth, iStartDay)
+
+  do iJD=tStartDate%iJulianDay, tEndDate%iJulianDay
+    call gregorian_date(iJD, iYear, iMonth, iDay)
+    if(iMonth /= iStartMonth) then
+      iNumMonths = iNumMonths + 1
+      call tStartPeriod%calcJulianDay(iStartMonth, iStartDay,iStartYear, 0, 0, 0)
+      call tEndPeriod%calcJulianDay(iEndMonth, iEndDay,iEndYear, 0, 0, 0)
+      iStartMonth = iMonth
+      iStartDay = iDay
+      iStartYear = iYear
+
+      call pDateRange(iNumMonths)%new(tStartPeriod, tEndPeriod)
+    endif
+    iEndMonth = iMonth; iEndYear = iYear; iEndDay = iDay
+  enddo
+
+  ! allow for one more month to account for partial month at end of range
+  if(iEndMonth == iStartMonth) then
+    iNumMonths = iNumMonths + 1
+    call tStartPeriod%calcJulianDay(iStartMonth, iStartDay,iStartYear, 0, 0, 0)
+    call tEndPeriod%calcJulianDay(iEndMonth, iEndDay,iEndYear, 0, 0, 0)
+    call pDateRange(iNumMonths)%new(tStartPeriod, tEndPeriod)
+  endif
+
+end function make_monthly_dates_list_fn
+
+!------------------------------------------------------------------------------
+
+function make_annual_dates_list_fn(tStartDate, tEndDate)       result(pDateRange)
+
+  implicit none
+
+  type (T_DATETIME), intent(in) :: tStartDate, tEndDate
+
+  type (T_DATERANGE), dimension(:), pointer :: pDateRange
+
+  ! [ LOCALS ]
+  type (T_DATETIME) :: tStartPeriod, tEndPeriod
+  integer (kind=T_INT) :: iStat, iSize, i, iNumYears
+  character (len=256) :: sStartDate, sStartTime, sEndDate, sEndTime
+  integer (kind=T_INT) :: iMonth, iDay, iYear, iJD
+  integer (kind=T_INT) :: iStartMonth, iStartDay, iStartYear
+  integer (kind=T_INT) :: iEndMonth, iEndDay, iEndYear
+
+  iNumYears = 0
+  call gregorian_date(tStartDate%iJulianDay, iStartYear, iStartMonth, iStartDay)
+
+  do iJD=tStartDate%iJulianDay, tEndDate%iJulianDay
+    call gregorian_date(iJD, iYear, iMonth, iDay)
+    if(iYear /= iStartYear) then
+      iNumYears = iNumYears + 1
+      iStartYear = iYear
+    endif
+  enddo
+
+  ! allow for one more year to account for partial year at end of range
+  iNumYears = iNumYears + 1
+
+  allocate(pDateRange(iNumYears), stat = iStat)
+  call Assert(iStat == 0, "Problem allocating memory for date range data structure", &
+     trim(__FILE__), __LINE__)
+
+  iNumYears = 0
+  call gregorian_date(tStartDate%iJulianDay, iStartYear, iStartMonth, iStartDay)
+
+  do iJD=tStartDate%iJulianDay, tEndDate%iJulianDay
+    call gregorian_date(iJD, iYear, iMonth, iDay)
+    if(iYear /= iStartYear) then
+      iNumYears = iNumYears + 1
+      call tStartPeriod%calcJulianDay(iStartMonth, iStartDay,iStartYear, 0, 0, 0)
+      call tEndPeriod%calcJulianDay(iEndMonth, iEndDay,iEndYear, 0, 0, 0)
+      iStartMonth = iMonth
+      iStartDay = iDay
+      iStartYear = iYear
+
+      call pDateRange(iNumYears)%new(tStartPeriod, tEndPeriod)
+    endif
+    iEndMonth = iMonth; iEndYear = iYear; iEndDay = iDay
+  enddo
+
+  ! allow for one more year to account for partial year at end of range
+  if(iEndYear == iStartYear) then
+    iNumYears = iNumYears + 1
+    call tStartPeriod%calcJulianDay(iStartMonth, iStartDay,iStartYear, 0, 0, 0)
+    call tEndPeriod%calcJulianDay(iEndMonth, iEndDay,iEndYear, 0, 0, 0)
+    call pDateRange(iNumYears)%new(tStartPeriod, tEndPeriod)
+  endif
+
+end function make_annual_dates_list_fn
 
 !--------------------------------------------------------------------------
 
