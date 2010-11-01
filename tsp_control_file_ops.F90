@@ -5,10 +5,6 @@ module tsp_control_file_ops
   use tsp_datetime_class
   implicit none
 
-  integer (kind=T_INT), parameter :: MAXARGLENGTH = 256
-  integer, parameter    :: MAXBLOCKLENGTH = 10000
-
-
   !> @brief This defined type holds keyword and argument pairs for
   !> a TSPROC block. Bound procedures allow access to class members.
   type, public :: T_BLOCK
@@ -233,6 +229,10 @@ function read_block_fn(this)      result(pBlock)
       sArg2(i) = TRIM(sLine)    ! return remainder of line as second arg
       iLineNum(i) = this%iLineNumber
 
+      call assert(len_trim(sArg1(i)) > 0, "Missing value in "//trim(pBlock%sBlockname) &
+        //", keyword: "//quote(sKeyword(i))//", line number "//trim(asChar(iLineNUm(i) )), &
+        trim(__FILE__), __LINE__)
+
     else
       call Assert( lFALSE, &
         "Problem with control file at line: "//asChar(this%iLineNumber), &
@@ -351,7 +351,10 @@ subroutine new_block_from_list_sub(this, sBlockname, sKeyword, sArg1)
 
   do i=1,iSize
     this%iLineNum(i) = i
-  enddo
+    call assert(len_trim(this%sArg1(i)) > 0,"Missing argument in block assembled " &
+      //" from varible lists; keyword: "//trim(this%sKeyword(i)), &
+      trim(__FILE__),__LINE__)
+   enddo
 
   this%iStartingLineNumber = 1
   this%sBlockname = trim(sBlockname)
@@ -410,6 +413,9 @@ subroutine add_to_block_from_list_sub(this, sKeyword, sArg1)
 
   do i=1,(iNewSize)
     this%iLineNum(i) = i
+    call assert(len_trim(this%sArg1(i)) > 0,"Missing argument in block assembled " &
+      //" from varible lists; keyword: "//trim(this%sKeyword(i)), &
+      trim(__FILE__),__LINE__)
   enddo
 
 end subroutine add_to_block_from_list_sub
@@ -584,6 +590,7 @@ function get_integer_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: i, n, iCount
+  integer (kind=T_INT) :: iStat
   character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   n = size(this%sKeyword)
@@ -611,7 +618,11 @@ function get_integer_values_by_keyword_fn(this, sKeyword)    result(pArgs)
     allocate(sArgs(iCount))
     sArgs = pack(this%sArg1,this%lSelect)
     do i=1,iCount
-      read(sArgs(i),fmt=*) pArgs(i)
+      read(sArgs(i),fmt=*, iostat=iStat) pArgs(i)
+      call assert(iStat==0,"Could not read integer value in block " &
+      //"starting at line number " &
+      //trim(asChar(this%iStartingLineNumber))//": "//trim(this%sBlockname), &
+      trim(__FILE__),__LINE__)
     enddo
   endif
 
@@ -627,6 +638,7 @@ function get_real_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: i, n, iCount
+  integer (kind=T_INT) :: iStat
   character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   n = size(this%sKeyword)
@@ -654,7 +666,11 @@ function get_real_values_by_keyword_fn(this, sKeyword)    result(pArgs)
     allocate(sArgs(iCount))
     sArgs = pack(this%sArg1,this%lSelect)
     do i=1,iCount
-      read(sArgs(i),fmt=*) pArgs(i)
+      read(sArgs(i),fmt=*, iostat=iStat) pArgs(i)
+      call assert(iStat==0,"Could not read real value in block " &
+      //"starting at line number " &
+      //trim(asChar(this%iStartingLineNumber))//": "//trim(this%sBlockname), &
+      trim(__FILE__),__LINE__)
     enddo
 
   endif

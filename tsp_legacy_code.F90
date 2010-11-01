@@ -3,11 +3,12 @@ module tsp_legacy_code
   use tsp_data_structures
   use tsp_control_file_ops
   use tsp_collections
+  use tsp_time_series_manager
   use tsp_utilities
   implicit none
 
   private
-  public :: pest_files, slide, locmin, fixed
+  public :: pest_files, slide, locmin, fixed, calc_digital_filter
 
   integer (kind=T_INT) :: MAXSERIES
   integer (kind=T_INT)  :: MAXTABLES
@@ -2604,6 +2605,407 @@ SUBROUTINE LOCMIN(NDAYS,DIS,INTRVL,GDIS)
 !
       RETURN
 END SUBROUTINE LOCMIN
+
+subroutine lpdes(fc,t,ns,a,b,c)
+
+! -- Subroutine LPDES evaluates the coefficients for a low pass filter.
+
+       implicit none
+       integer, intent(in) :: ns
+       real, intent(in)    :: fc,t
+       real, intent(out)   :: a(ns),b(ns),c(ns)
+
+       integer k
+       real pi,wcp,cs,x
+
+       pi=3.1415926536
+       wcp=sin(fc*pi*t)/cos(fc*pi*t)
+       do 120 k=1,ns
+         cs=cos(float(2*(k+ns)-1)*pi/float(4*ns))
+         x=1.0/(1.0+wcp*wcp-2.0*wcp*cs)
+         a(k)=wcp*wcp*x
+         b(k)=2.0*(wcp*wcp-1.0)*x
+         c(k)=(1.0+wcp*wcp+2.0*wcp*cs)*x
+120    continue
+       return
+
+end subroutine lpdes
+
+
+subroutine hpdes(fc,t,ns,a,b,c)
+
+! -- Subroutine HPDES evaluates the coefficients for a high pass filter.
+
+       implicit none
+       integer, intent(in) :: ns
+       real, intent(in)    :: fc,t
+       real, intent(out)   :: a(ns),b(ns),c(ns)
+
+       integer k
+       real pi,wcp,cs
+
+       pi=3.1415926536
+       wcp=sin(fc*pi*t)/cos(fc*pi*t)
+       do 120 k=1,ns
+         cs=cos(float(2*(k+ns)-1)*pi/float(4*ns))
+         a(k)=1.0/(1.0+wcp*wcp-2.0*wcp*cs)
+         b(k)=2.0*(wcp*wcp-1.0)*a(k)
+         c(k)=(1.0+wcp*wcp+2.0*wcp*cs)*a(k)
+120    continue
+       return
+
+end subroutine hpdes
+
+
+subroutine bpdes(f1,f2,t,ns,a,b,c,d,e)
+
+! -- Subroutine BPDES evaluates the coefficients for a band pass filter.
+
+       implicit none
+       integer, intent(in) :: ns
+       real, intent(in)    :: f1,f2,t
+       real, intent(out)   :: a(ns),b(ns),c(ns),d(ns),e(ns)
+
+       integer k
+       real pi,w1,w2,wc,q,s,cs,p,r,x
+
+       pi=3.1415926536
+       w1=sin(f1*pi*t)/cos(f1*pi*t)
+       w2=sin(f2*pi*t)/cos(f2*pi*t)
+       wc=w2-w1
+       q=wc*wc+2.0*w1*w2
+       s=w1*w1*w2*w2
+       do k=1,ns
+         cs=cos(float(2*(k+ns)-1)*pi/float(4*ns))
+         p=-2.0*wc*cs
+         r=p*w1*w2
+         x=1.0+p+q+r+s
+         a(k)=wc*wc/x
+         b(k)=(-4.0-2.0*p+2.0*r+4.0*s)/x
+         c(k)=(6.0-2.0*q+6.0*s)/x
+         d(k)=(-4.0+2.0*p-2.0*r+4.0*s)/x
+         e(k)=(1.0-p+q-r+s)/x
+       end do
+
+       return
+
+end subroutine bpdes
+
+
+subroutine calc_digital_filter(rValue, rNewValue, iFILTER_TYPE, iFILTER_PASS, iSTAGES, &
+    iPASSES, rCUTOFF_FREQUENCY_, rCUTOFF_FREQUENCY_1_, rCUTOFF_FREQUENCY_2_, rALPHA_, &
+    lREVERSE_SECOND_STAGE_, lCLIP_INPUT_, lCLIP_ZERO_ )
+
+    real (kind=T_SGL), dimension(:), intent(in) :: rValue
+    real (kind=T_SGL), dimension(:), intent(inout) :: rNewValue
+
+    integer (kind=T_INT), intent(in) :: iFILTER_TYPE
+    integer (kind=T_INT), intent(in) :: iFILTER_PASS
+    integer (kind=T_INT), intent(in) :: iSTAGES
+    integer (kind=T_INT), intent(in) :: iPASSES
+    real (kind=T_SGL), intent(in), optional :: rCUTOFF_FREQUENCY_
+    real (kind=T_SGL), intent(in), optional :: rCUTOFF_FREQUENCY_1_
+    real (kind=T_SGL), intent(in), optional :: rCUTOFF_FREQUENCY_2_
+    real (kind=T_SGL), intent(in), optional :: rALPHA_
+    logical (kind=T_LOGICAL), intent(in), optional :: lREVERSE_SECOND_STAGE_
+    logical (kind=T_LOGICAL), intent(in), optional :: lCLIP_INPUT_
+    logical (kind=T_LOGICAL),intent(in), optional :: lCLIP_ZERO_
+
+    real (kind=T_SGL), dimension(size(rValue)) :: rTempVal
+
+    integer ierr,icontext,iseries,itemp,nsterm,ilags,j,nsecs,ndays, &
+    dd,mm,yy,hh,nn,ss,i,ixcon,ns,k,jclipzero,jclipinput,jfreq1,jfreq2, &
+    jfreq,jns,jfilpass,jpass,jalpha,ipass,ip
+    integer jrevstage2,jj
+    real (kind=T_SGL) :: rtemp,freq,freq1,freq2,af,bf,cf,df,ef,tdelt,alpha,alpha1,fk_1, &
+    yk1,yk,yk_1
+    real a(3),b(3),c(3),d(3),e(3),rval(-3:5),gval(-3:5)
+    character*3 aaa
+
+    ! set values for some constants
+    integer (kind=T_INT), parameter :: iBUTTERWORTH = 1
+    integer (kind=T_INT), parameter :: iBASEFLOW_SEPERATION = 2
+
+    integer (kind=T_INT), parameter :: iLOW_PASS = 1
+    integer (kind=T_INT), parameter :: iBAND_PASS = 2
+    integer (kind=T_INT), parameter :: iHIGH_PASS = 3
+
+    logical (kind=T_LOGICAL) :: lREVERSE_SECOND_STAGE
+    logical (kind=T_LOGICAL) :: lCLIP_INPUT
+    logical (kind=T_LOGICAL) :: lCLIP_ZERO
+
+    ! translate values into terms of local variables
+    nsterm = size(rValue)
+    ns = iSTAGES
+    ipass = iPASSES
+
+    if(present( rCUTOFF_FREQUENCY_) ) then
+      freq = rCUTOFF_FREQUENCY_
+    else
+      freq = 1. /  10.
+    endif
+
+    if(present( rCUTOFF_FREQUENCY_1_) ) then
+      freq1 = rCUTOFF_FREQUENCY_1_
+    else
+      freq1 = 1. / 10.
+    endif
+
+    if(present( rCUTOFF_FREQUENCY_2_) ) then
+      freq2 = rCUTOFF_FREQUENCY_2_
+    else
+      freq2 = 1. / 3.
+    endif
+
+    if(present(lREVERSE_SECOND_STAGE_) ) then
+      lREVERSE_SECOND_STAGE = lREVERSE_SECOND_STAGE_
+    else
+      lREVERSE_SECOND_STAGE = lFALSE
+    endif
+
+    if(present(lCLIP_INPUT_) ) then
+      lCLIP_INPUT = lCLIP_INPUT_
+    else
+      lCLIP_INPUT = lFALSE
+    endif
+
+    if(present(lCLIP_ZERO_) ) then
+      lCLIP_ZERO = lCLIP_ZERO_
+    else
+      lCLIP_ZERO = lFALSE
+    endif
+
+    if(present(rALPHA_) ) then
+      alpha = rALPHA_
+    else
+      alpha = 0.95
+    endif
+
+
+! -- The filter coefficients are now calculated (butterworth filter).
+
+       if( iFILTER_TYPE == iBUTTERWORTH ) then
+!         tdelt=float(ilags)/86400.00
+!           tdelt = pTS%tData(2)%tDT - pTS%tData(1)%tDT
+            tdelt = 1.0
+!         if(filpass.eq.'low')then
+          if( iFILTER_PASS == iLOW_PASS ) then
+           call assert(freq < 0.5/tdelt, "Filter cutoff frequency must be " &
+           //"less than half of the series sampling frequency in digital_filter block", &
+           trim(__FILE__), __LINE__)
+           call lpdes(freq,tdelt,ns,a,b,c)
+          elseif( iFILTER_PASS == iHIGH_PASS ) then
+           call assert(freq1 < 0.5/tdelt, "Filter cutoff frequency must be " &
+           //"less than half of the series sampling frequency in digital_filter block", &
+           trim(__FILE__), __LINE__)
+           call hpdes(freq,tdelt,ns,a,b,c)
+         else  ! band pass filter
+           call assert(freq1 < 0.5/tdelt .and. freq2 < 0.5/tdelt, &
+           "Filter cutoff frequency must be " &
+           //"less than half of the series sampling frequency in digital_filter block", &
+           trim(__FILE__), __LINE__)
+           call bpdes(freq1,freq2,tdelt,ns,a,b,c,d,e)
+         end if
+       end if
+
+! -- Now the butterworth filtering is carried out. But first a temporary time series is
+!    allocated if needed.
+
+!       if(filtype(1:4).eq.'base') go to 700
+       if( iFILTER_TYPE == iBUTTERWORTH ) then
+
+          do k=1,ns
+            af=a(k)
+            bf=b(k)
+            cf=c(k)
+            if(k == 2 .and. lREVERSE_SECOND_STAGE )then
+              af=a(1)
+              bf=b(1)
+              cf=c(1)
+            end if
+   !         if(filpass.eq.'band')then
+            if(iFILTER_PASS == iBAND_PASS) then
+              df=d(k)
+              ef=e(k)
+            end if
+            if(k == 1)then
+              do j=1,5
+                rval(j)=rValue(j)
+              end do
+            else
+              do j=1,5
+                rval(j)=rTempVal(j)
+              end do
+            end if
+   !         rval(0)=rval(1)-(rval(2)-rval(1))
+   !         rval(-1)=rval(0)-(rval(1)-rval(0))
+   !         rval(-2)=rval(-1)-(rval(0)-rval(-1))
+   !         rval(-3)=rval(-2)-(rval(-1)-rval(-2))
+   !         gval(-3)=rval(-3)
+   !         gval(-2)=rval(-2)
+   !         gval(-1)=rval(-1)
+   !         gval(0)=rval(0)
+            rval(0)=rval(1)
+            rval(-1)=rval(0)
+            rval(-2)=rval(-1)
+            rval(-3)=rval(-2)
+   !         if(filpass.eq.'low')then
+            if(iFILTER_PASS == iLOW_PASS) then
+              gval(-3)=rval(-3)
+              gval(-2)=rval(-2)
+              gval(-1)=rval(-1)
+              gval(0)=rval(0)
+            else
+              gval(-3)=0.0
+              gval(-2)=0.0
+              gval(-1)=0.0
+              gval(0)=0.0
+            end if
+   !         if(filpass.eq.'low')then
+            if(iFILTER_PASS == iLOW_PASS) then
+              do j=1,5
+                gval(j)=af*(rval(j)+2.0*rval(j-1)+rval(j-2))-  &
+                bf*gval(j-1)-cf*gval(j-2)
+              end do
+    !        else if(filpass.eq.'high')then
+            elseif(iFILTER_PASS == iHIGH_PASS) then
+              do j=1,5
+                gval(j)=af*(rval(j)-2.0*rval(j-1)+rval(j-2))-  &
+                bf*gval(j-1)-cf*gval(j-2)
+              end do
+            else
+              do j=1,5
+                gval(j)=af*(rval(j)-2.0*rval(j-2)+rval(j-4))-bf*gval(j-1)-  &
+                cf*gval(j-2)-df*gval(j-3)-ef*gval(j-4)
+              end do
+            end if
+            do j=1,5
+              rNewValue(j)=gval(j)
+            end do
+   !         if(filpass.eq.'low')then
+            if(iFILTER_PASS == iLOW_PASS) then
+              if(k /= 1)then
+                do j=6,nsterm
+                  rNewValue(j)=af*(rTempVal(j)+    &
+                  2.0*rTempVal(j-1)+rTempVal(j-2))-  &
+                  bf*rNewValue(j-1) - cf* rNewValue(j-2)
+                end do
+              else
+                do j=6,nsterm
+                  rNewValue(j)=af*(rValue(j)+    &
+                  2.0*rNewValue(j-1) + rNewValue(j-2) )-  &
+                  bf*rNewValue(j-1) -cf*rNewValue(j-2)
+                end do
+              end if
+   !         else if(filpass.eq.'high')then
+            elseif(iFILTER_PASS == iHIGH_PASS) then
+              if(k /= 1)then
+                do j=6,nsterm
+                  rNewValue(j)=af*(rTempVal(j)-     &
+                  2.0*rTempVal(j-1)+rTempVal(j-2))-  &
+                  bf*rNewValue(j-1) -cf*rNewValue(j-2)
+                end do
+              else
+                do j=6,nsterm
+                  rNewValue(j)=af*(rValue(j)-     &
+                  2.0*rNewValue(j-1) + rNewValue(j-2) )-  &
+                  bf*rNewValue(j-1) -cf*rNewValue(j-2)
+                end do
+              end if
+            else  ! BAND PASS filter
+              if(k /= 1)then
+                do j=6,nsterm
+                  rNewValue(j)=af*(rTempVal(j)-    &
+                  2.0*rTempVal(j-2)+rTempVal(j-4))-  &
+                  bf*rNewValue(j-1) -cf*rNewValue(j-2) -    &
+                  df*rNewValue(j-3) -ef*rNewValue(j-4)
+   !               if(abs(rNewValue(j)).gt.1.0e30) go to 9400
+                  call assert(abs(rNewValue(j)) < 1.0e30,"Bandpass filter " &
+                    //"is numerically unstable - consider using a wider pass band.", &
+                    trim(__FILE__),__LINE__)
+                end do
+              else
+                do j=6,nsterm
+                  rNewValue(j)=af*(rValue(j)-    &
+                  2.0*rNewValue(j-2) +rNewValue(j-4) )-  &
+                  bf*rNewValue(j-1) -cf*rNewValue(j-2) -    &
+                  df*rNewValue(j-3) -ef*rNewValue(j-4)
+   !               if(abs(rNewValue(j)).gt.1.0e30) go to 9400
+                   call assert(abs(rNewValue(j)) < 1.0e30,"Bandpass filter " &
+                    //"with pass band "//trim(asChar(freq1,8,2))//" to "//trim(asChar(freq2,8,2)) &
+                    //" is numerically unstable - consider using a wider pass band.", &
+                    trim(__FILE__),__LINE__)
+                 end do
+              end if
+            end if
+            if(k /= ns)then
+              if( (k == 1) .and. lREVERSE_SECOND_STAGE )then
+                do j=1,nsterm
+                  rTempVal(j) = rNewValue(nsterm-j+1)
+                end do
+              else
+                do j=1,nsterm
+                  rTempVal(j) = rNewValue(j)
+                end do
+              end if
+            else
+              if( lREVERSE_SECOND_STAGE )then
+                do j=1,nsterm/2
+                  jj=nsterm-j+1
+                  rtemp = rNewValue(j)
+                  rNewValue(j) = rNewValue(jj)
+                  rNewValue(jj) = rtemp
+                end do
+              end if
+            end if
+          end do
+
+       else   ! -- Baseflow separation filtering is carried out.
+
+!       call alloc_tempseries(ierr,nsterm)
+!       if(ierr.ne.0) go to 9800
+
+          alpha1=(1.0+alpha)*0.5
+          do ip=1,ipass
+            if(ip == 1)then
+
+              do j=1,nsterm
+                rTempVal(j)=rValue(j)
+              end do
+            else if((ip == 2).or.(ip == 3))then
+              print *, __LINE__
+              do j=1,nsterm
+                rTempVal(j) = rNewValue(nsterm+1-j)
+              end do
+            end if
+            yk=rTempVal(1)
+            yk1=rTempVal(2)
+            yk_1=yk-(yk1-yk)
+            fk_1=yk_1
+            rNewValue(1) =alpha*fk_1+alpha1*(yk-yk_1)
+            do j=2,nsterm
+              rNewValue(j)=alpha*rNewValue(j-1) + alpha1*  &
+              (rTempVal(j)-rTempVal(j-1))
+            end do
+          end do
+
+       endif
+
+! -- The following applies to both types of filtering.
+
+       if( lCLIP_ZERO )then
+         do j=1,nsterm
+           if(rNewValue(j).lt.0.0)rNewValue(j)=0.0
+         end do
+       end if
+       if( lCLIP_INPUT )then
+         do j=1,nsterm
+           if(rNewValue(j).gt. rValue(j))  &
+              rNewValue(j) =  rValue(j)
+         end do
+       end if
+
+end subroutine calc_digital_filter
 
 
 end module tsp_legacy_code

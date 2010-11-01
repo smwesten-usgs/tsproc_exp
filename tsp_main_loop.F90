@@ -121,17 +121,25 @@ subroutine listseriesnames(sSeriesnames)
   ! [ LOCALS ]
   character (len=256) :: sFormatString
   integer (kind=T_INT) :: iCount, i
+  type (T_TIME_SERIES), pointer :: pCurrent
 
   sSeriesnames = ""
 
-  if(associated(TS%pTS)) then
+  if(associated(TS%pTS_Head)) then
 
-    iCount = size(TS%pTS)
+    pCurrent => TS%pTS_Head
 
-    write(sFormatString, fmt="('(',i4,'(a,1x))')") iCount
+    do
 
-    write(sSeriesnames, fmt=trim(adjustl(sFormatString))) &
-          (trim(TS%pTS(i)%sSeriesname),i=1,iCount)
+      if(.not. associated(pCurrent) ) exit
+      if(len_trim(sSeriesNames) == 0) then
+        sSeriesNames = trim(pCurrent%sSeriesName)
+      else
+        sSeriesNames = trim(sSeriesNames)//" "//trim(pCurrent%sSeriesName)
+      endif
+      pCurrent => pCurrent%pNext
+
+    enddo
 
   else
 
@@ -139,6 +147,7 @@ subroutine listseriesnames(sSeriesnames)
 
   endif
 
+  nullify(pCurrent)
 
 end subroutine listseriesnames
 
@@ -538,24 +547,29 @@ end subroutine listtablenames
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTempSeries
-    type (T_TABLE) :: tTable
-    integer (kind=T_INT) :: n
+    type (T_TABLE), pointer :: pTable
+    integer (kind=T_INT) :: n, iStat
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
     character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    allocate(pTable, stat=iStat)
+    call assert(iStat == 0, "Failed to allocate memory for table in " &
+      //"HYDROLOGIC_INDICES block starting at line " &
+      //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
       pTempSeries =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_i_table(pTempSeries)
+      call pTable%calc_i_table(pTempSeries)
 
     elseif(str_compare(pBlock%sBlockName, "HYDROLOGIC_INDICES")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
       pTempSeries => TS%getTS( sTempSeriesname )
-      call tTable%calc_i_table(pTempSeries, pBlock)
+      call pTable%calc_i_table(pTempSeries, pBlock)
 
     else
 
@@ -564,10 +578,313 @@ end subroutine listtablenames
 
     endif
 
-    call TS%add(tTable)
+    call TS%add(pTable)
     nullify(pTempSeries)
 
   end subroutine hydrologic_indices
+
+!------------------------------------------------------------------------------
+
+  subroutine digital_filter()
+
+    use tsp_legacy_code
+    implicit none
+
+    ! [ LOCALS ]
+    type (T_TIME_SERIES), pointer :: pTS
+    type (T_TIME_SERIES), pointer :: pNewSeries
+    integer (kind=T_INT) :: n
+    character (len=MAXARGLENGTH) :: sSeriesname, sNewSeriesName
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME, &
+      pNEW_SERIES_NAME, pFILTER_TYPE, pFILTER_PASS, pREVERSE_SECOND_STAGE, &
+      pCLIP_INPUT, pCLIP_ZERO, pDATE_1
+    real (kind=T_SGL), dimension(:), pointer :: pCUTOFF_FREQUENCY, &
+      pCUTOFF_FREQUENCY_1, pCUTOFF_FREQUENCY_2, pALPHA
+    integer (kind=T_INT), dimension(:), pointer :: pSTAGES, pPASSES
+    type (T_DATETIME) :: tDATETIME_1, tDATETIME_2
+
+    integer (kind=T_INT) :: iFILTER_TYPE
+    integer (kind=T_INT) :: iFILTER_PASS
+    integer (kind=T_INT) :: iSTAGES
+    integer (kind=T_INT) :: iPASSES
+
+    real (kind=T_SGL) :: rCUTOFF_FREQUENCY
+    real (kind=T_SGL) :: rCUTOFF_FREQUENCY_1
+    real (kind=T_SGL) :: rCUTOFF_FREQUENCY_2
+    real (kind=T_SGL) :: rALPHA
+
+    ! set values for some constants
+    integer (kind=T_INT), parameter :: iBUTTERWORTH = 1
+    integer (kind=T_INT), parameter :: iBASEFLOW_SEPERATION = 2
+
+    integer (kind=T_INT), parameter :: iLOW_PASS = 1
+    integer (kind=T_INT), parameter :: iBAND_PASS = 2
+    integer (kind=T_INT), parameter :: iHIGH_PASS = 3
+
+    logical (kind=T_LOGICAL) :: lREVERSE_SECOND_STAGE
+    logical (kind=T_LOGICAL) :: lCLIP_INPUT
+    logical (kind=T_LOGICAL) :: lCLIP_ZERO
+
+    ! set default values
+    iFILTER_TYPE = iBASEFLOW_SEPERATION
+    iFILTER_PASS = iLOW_PASS
+    iSTAGES = 1
+    iPASSES = 1
+    rCUTOFF_FREQUENCY = 0.1
+    rCUTOFF_FREQUENCY_1 = 0.1
+    rCUTOFF_FREQUENCY_2 = 0.3
+    rALPHA = 0.95
+
+    if(str_compare(pBlock%sBlockName, "DIGITAL_FILTER")) then
+
+      ! set default values for DATE_1 and DATE_2
+      call tDATETIME_1%parseDate("01/01/0001")
+      call tDATETIME_1%parseTime("12:00:00")
+      call tDATETIME_2%parseDate("12/31/3000")
+      call tDATETIME_2%parseTime("12:00:00")
+
+      pDATE_1 => pBlock%getString("DATE_1")
+      if(str_compare(pDATE_1(1),"NA")) then
+        call warn(lFALSE, "Must supply values for DATE_1, and DATE_2")
+      else
+        ! get DATE_1, TIME_1, DATE_2, TIME_2 if supplied
+        call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
+      endif
+
+      pSERIES_NAME =>pBlock%getString("SERIES_NAME")
+      sSeriesname = pSERIES_NAME(1)
+      call assert(.not. str_compare(pSERIES_NAME(1),"NA"), "No SERIES_NAME " &
+        //"specified in the DIGITAL_FILTER block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+      pTS => TS%getTS(sSeriesName)
+
+      pNEW_SERIES_NAME =>pBlock%getString("NEW_SERIES_NAME")
+      sNewSeriesname = pNEW_SERIES_NAME(1)
+      if(str_compare(pNEW_SERIES_NAME(1),"NA")) then
+        sNewSeriesname = trim(sSeriesName)//"_DF"
+      else
+        sNewSeriesname = trim(pNEW_SERIES_NAME(1))
+      endif
+
+      pFILTER_TYPE =>pBlock%getString("FILTER_TYPE")
+      call assert(.not. str_compare(pFILTER_TYPE(1),"NA"), "No FILTER_TYPE " &
+        //"specified in the DIGITAL_FILTER block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+      if(str_compare(pFILTER_TYPE(1), "BUTTERWORTH") ) then
+        iFILTER_TYPE = iBUTTERWORTH
+      elseif(str_compare(pFILTER_TYPE(1), "BASEFLOW_SEPERATION") ) then
+        iFILTER_TYPE = iBASEFLOW_SEPERATION
+      else
+        call assert(lFALSE, &
+        "FILTER_TYPE must be 'BUTTERWORTH' or 'BASEFLOW_SEPERATION' in DIGITAL_FILTER " &
+        //"block starting at line "//trim(asChar(pBlock%iStartingLineNumber) ), &
+        trim(__FILE__),__LINE__)
+      endif
+
+      pCLIP_INPUT =>pBlock%getString("CLIP_INPUT")
+      call warn(.not. str_compare(pCLIP_INPUT(1),"NA"), "No CLIP_INPUT " &
+        //"specified in the DIGITAL_FILTER block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ) )
+      if(str_compare(pCLIP_INPUT(1), "no") ) then
+        lCLIP_INPUT = lFALSE
+      else
+        lCLIP_INPUT = lTRUE
+      endif
+
+      pCLIP_ZERO =>pBlock%getString("CLIP_ZERO")
+      call warn(.not. str_compare(pCLIP_ZERO(1),"NA"), "No CLIP_ZERO " &
+        //"specified in the DIGITAL_FILTER block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ) )
+      if(str_compare(pCLIP_ZERO(1), "no") ) then
+        lCLIP_ZERO = lFALSE
+      else
+        lCLIP_ZERO = lTRUE
+      endif
+
+      allocate(pNewSeries)
+      allocate(pNewSeries%tData(size(pTS%tData)) )
+
+      pNewSeries = pTS
+      pNewSeries%pNext => null()
+      pNewSeries%pPrevious => null()
+
+
+      select case (iFILTER_TYPE)
+
+        case(iBUTTERWORTH)
+
+          pFILTER_PASS =>pBlock%getString("FILTER_PASS")
+          call assert(.not. str_compare(pFILTER_PASS(1),"NA"), "No FILTER_PASS " &
+            //"specified in the DIGITAL_FILTER block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+          if(str_compare(pFILTER_PASS(1), "LOW") ) then
+            iFILTER_PASS = iLOW_PASS
+          elseif(str_compare(pFILTER_PASS(1), "HIGH") ) then
+            iFILTER_PASS = iHIGH_PASS
+          elseif(str_compare(pFILTER_PASS(1), "BAND") ) then
+            iFILTER_PASS = iBAND_PASS
+          else
+            call assert(lFALSE, &
+              "FILTER_PASS must be 'LOW', 'HIGH', or 'BAND' in DIGITAL_FILTER " &
+              //"block starting at line "//trim(asChar(pBlock%iStartingLineNumber) ), &
+              trim(__FILE__),__LINE__)
+          endif
+
+          pSTAGES =>pBlock%getInt("STAGES")
+          call warn(pSTAGES(1) /= iNODATA, "No value specified for STAGES " &
+            //"in the DIGITAL_FILTER block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+          if(pSTAGES(1) /= iNODATA) then
+            iSTAGES = pSTAGES(1)
+            call assert(iSTAGES >= 1 .and. iSTAGES <= 3, "STAGES must be " &
+              //"'1', '2', or '3' in DIGITAL_FILTER block starting at line " &
+              //trim(asChar(pBlock%iStartingLineNumber) ), &
+              trim(__FILE__),__LINE__)
+          endif
+
+          pREVERSE_SECOND_STAGE =>pBlock%getString("REVERSE_SECOND_STAGE")
+          call warn(.not. str_compare(pREVERSE_SECOND_STAGE(1),"NA"), "No REVERSE_SECOND_STAGE " &
+            //"specified in the DIGITAL_FILTER block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ) )
+          if(str_compare(pREVERSE_SECOND_STAGE(1), "yes") ) then
+            lREVERSE_SECOND_STAGE = lTRUE
+          else
+            lREVERSE_SECOND_STAGE = lFALSE
+          endif
+
+          select case (iFILTER_PASS)
+
+            case(iLOW_PASS, iHIGH_PASS)
+
+              pCUTOFF_FREQUENCY =>pBlock%getReal("CUTOFF_FREQUENCY")
+              call assert(pCUTOFF_FREQUENCY(1) > rNEAR_ZERO, "No CUTOFF_FREQUENCY " &
+                //"specified in the DIGITAL_FILTER block starting at line " &
+                //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+              rCUTOFF_FREQUENCY = pCUTOFF_FREQUENCY(1)
+
+              call calc_digital_filter(pTS%tData%rValue, pNewSeries%tData%rValue, &
+                iFILTER_TYPE, &
+                iFILTER_PASS, iSTAGES, &
+                iPASSES, &
+                rCUTOFF_FREQUENCY, &
+                rCUTOFF_FREQUENCY_1, &
+                rCUTOFF_FREQUENCY_2, &
+                rALPHA, &
+                lREVERSE_SECOND_STAGE,&
+                lCLIP_INPUT, lCLIP_ZERO )
+
+            case(iBAND_PASS)
+
+              pCUTOFF_FREQUENCY_1 =>pBlock%getReal("CUTOFF_FREQUENCY_1")
+              if(pCUTOFF_FREQUENCY_1(1) > rNEAR_ZERO ) then
+                rCUTOFF_FREQUENCY_1 = pCUTOFF_FREQUENCY_1(1)
+              else
+                call assert(lFALSE, "No CUTOFF_FREQUENCY_1 " &
+                  //"specified in the DIGITAL_FILTER block starting at line " &
+                  //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+              endif
+
+              pCUTOFF_FREQUENCY_2 =>pBlock%getReal("CUTOFF_FREQUENCY_2")
+              if(pCUTOFF_FREQUENCY_2(1) > rNEAR_ZERO ) then
+                rCUTOFF_FREQUENCY_2 = pCUTOFF_FREQUENCY_2(1)
+              else
+                call assert(lFALSE, "No CUTOFF_FREQUENCY_2 " &
+                  //"specified in the DIGITAL_FILTER block starting at line " &
+                  //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+              endif
+
+              call assert(rCUTOFF_FREQUENCY_2 > rCUTOFF_FREQUENCY_1, &
+                "CUTOFF_FREQUENCY_2 must be greater than CUTOFF_FREQUENCY_1 in " &
+                //"DIGITAL_FILTER block starting at line " &
+                //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+
+              call calc_digital_filter(pTS%tData%rValue, pNewSeries%tData%rValue, &
+                iFILTER_TYPE, &
+                iFILTER_PASS, iSTAGES, &
+                iPASSES, &
+                rCUTOFF_FREQUENCY, &
+                rCUTOFF_FREQUENCY_1, &
+                rCUTOFF_FREQUENCY_2, &
+                rALPHA, &
+                lREVERSE_SECOND_STAGE,&
+                lCLIP_INPUT, lCLIP_ZERO )
+
+            case default
+
+              call Assert(lFALSE, "Unhandled case in routine digital_filter", &
+                trim(__FILE__), __LINE__)
+
+          end select
+
+
+        case(iBASEFLOW_SEPERATION)
+
+          pALPHA =>pBlock%getReal("ALPHA")
+          call assert(pALPHA(1) > rNEAR_ZERO, "No ALPHA " &
+            //"specified in the DIGITAL_FILTER block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+          rALPHA = pALPHA(1)
+          call assert( rALPHA > 0., "Value specified for ALPHA must be greater " &
+            //"than zero in the DIGITAL_FILTER block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+
+          pPASSES =>pBlock%getInt("PASSES")
+          call warn(pPASSES(1) /= iNODATA, "No value specified for PASSES " &
+            //"in the DIGITAL_FILTER block starting at line " &
+            //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+          if(pPASSES(1) /= iNODATA) then
+            iPASSES = pPASSES(1)
+            call assert(iPASSES == 1 .or. iPASSES == 3, "PASSES " &
+              //"may be set to '1' or '3' in DIGITAL_FILTER block starting at line "// &
+              trim(asChar(pBlock%iStartingLineNumber)), trim(__FILE__), __LINE__)
+          endif
+
+          call calc_digital_filter(pTS%tData%rValue, pNewSeries%tData%rValue, &
+            iFILTER_TYPE, &
+            iFILTER_PASS, iSTAGES, &
+            iPASSES, &
+            rCUTOFF_FREQUENCY, &
+            rCUTOFF_FREQUENCY_1, &
+            rCUTOFF_FREQUENCY_2, &
+            rALPHA, &
+            lREVERSE_SECOND_STAGE,&
+            lCLIP_INPUT, lCLIP_ZERO )
+
+        case default
+
+          call Assert(lFALSE, "Unhandled case in routine digital_filter", &
+            trim(__FILE__), __LINE__)
+
+      end select
+
+      pNewSeries%sSeriesName = trim(sNewSeriesName)
+
+    else
+
+      call Assert(lFALSE, "Unhandled case in routine digital_filter", &
+        trim(__FILE__), __LINE__)
+
+    endif
+
+    call TS%add(pNewSeries)
+
+    ! cleanup any remaining pointers
+    if(associated(pSERIES_NAME )) deallocate(pSERIES_NAME)
+    if(associated(pNEW_SERIES_NAME )) deallocate(pNEW_SERIES_NAME)
+    if(associated(pFILTER_TYPE )) deallocate(pFILTER_TYPE)
+    if(associated(pFILTER_PASS )) deallocate(pFILTER_PASS)
+    if(associated(pREVERSE_SECOND_STAGE )) deallocate(pREVERSE_SECOND_STAGE)
+    if(associated(pCLIP_INPUT )) deallocate(pCLIP_INPUT)
+    if(associated(pCLIP_ZERO )) deallocate(pCLIP_ZERO)
+    if(associated(pDATE_1 )) deallocate(pDATE_1)
+    if(associated(pCUTOFF_FREQUENCY )) deallocate(pCUTOFF_FREQUENCY)
+    if(associated(pCUTOFF_FREQUENCY_1 )) deallocate(pCUTOFF_FREQUENCY_1)
+    if(associated(pCUTOFF_FREQUENCY_2 )) deallocate(pCUTOFF_FREQUENCY_2)
+    if(associated(pALPHA )) deallocate(pALPHA)
+    if(associated(pSTAGES )) deallocate(pSTAGES)
+    if(associated(pPASSES )) deallocate(pPASSES)
+
+  end subroutine digital_filter
 
 !------------------------------------------------------------------------------
 
@@ -589,7 +906,7 @@ end subroutine listtablenames
       ! don't pass along the block object; use defaults
       pNewSeries => pTempSeries%findHydroEvents()
 
-    elseif(str_compare(pBlock%sBlockName, "HYDRO_PEAKS")) then
+    elseif(str_compare(pBlock%sBlockName, "HYDRO_EVENTS")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
@@ -598,7 +915,7 @@ end subroutine listtablenames
 
     else
 
-      call Assert(lFALSE, "Unhandled case in routine hydro_peaks", &
+      call Assert(lFALSE, "Unhandled case in routine hydro_events", &
         trim(__FILE__), __LINE__)
 
     endif
@@ -618,24 +935,29 @@ end subroutine listtablenames
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTempSeries
-    type (T_TABLE) :: tTable
-    integer (kind=T_INT) :: n
+    type (T_TABLE), pointer :: pTable
+    integer (kind=T_INT) :: n, iStat
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
     character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    allocate(pTable, stat=iStat)
+    call assert(iStat == 0, "Failed to allocate memory for table in " &
+      //"EXCEEDENCE_TIME block starting at line " &
+      //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
       pTempSeries =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_e_table(pTempSeries)
+      call pTable%calc_e_table(pTempSeries)
 
     elseif(str_compare(pBlock%sBlockName, "EXCEEDENCE_TIME")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
       pTempSeries => TS%getTS( sTempSeriesname )
-      call tTable%calc_e_table(pTempSeries, pBlock)
+      call pTable%calc_e_table(pTempSeries, pBlock)
 
     else
 
@@ -644,7 +966,7 @@ end subroutine listtablenames
 
     endif
 
-    call TS%add(tTable)
+    call TS%add(pTable)
     nullify(pTempSeries)
 
   end subroutine exceedence_time
@@ -657,24 +979,29 @@ end subroutine listtablenames
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTempSeries
-    type (T_TABLE) :: tTable
-    integer (kind=T_INT) :: n
+    type (T_TABLE), pointer :: pTable
+    integer (kind=T_INT) :: n, iStat
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
     character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    allocate(pTable, stat=iStat)
+    call assert(iStat == 0, "Failed to allocate memory for table in " &
+      //"SERIES_STATISTICS block starting at line " &
+      //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
       pTempSeries =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_s_table(pTempSeries)
+      call pTable%calc_s_table(pTempSeries)
 
     elseif(str_compare(pBlock%sBlockName, "SERIES_STATISTICS")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
       sTempSeriesname = pArgs(1)
       pTempSeries => TS%getTS( sTempSeriesname )
-      call tTable%calc_s_table(pTempSeries, pBlock)
+      call pTable%calc_s_table(pTempSeries, pBlock)
 
     else
 
@@ -683,7 +1010,7 @@ end subroutine listtablenames
 
     endif
 
-    call TS%add(tTable)
+    call TS%add(pTable)
     nullify(pTempSeries)
 
   end subroutine series_statistics
@@ -761,7 +1088,7 @@ subroutine reduce_time_span(sSeriesname, sStartdate, sEnddate)
 
       ! get DATE_1, TIME_1, DATE_2, TIME_2 if supplied
       call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
-      pNEW_SERIES_NAME = pBlock%getString("NEW_SERIES_NAME")
+      pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
       if(str_compare(pNEW_SERIES_NAME(1),"NA")) then
         pNewSeries%sSeriesName = trim(sSeriesName)//"_RDC"
       else
@@ -800,6 +1127,282 @@ end subroutine reduce_time_span
 
 !------------------------------------------------------------------------------
 
+subroutine series_compare(sObservedSeries_, sModeledSeries_, sNewTableName_, &
+    sStartdate_, sEnddate_)
+
+  !f2py character*(*), intent(in), optional :: sObservedSeries_
+  !f2py character*(*), intent(in), optional :: sModeledSeries_
+  !f2py character*(*), intent(in), optional :: sNewTableName_
+  !f2py character*(*), intent(in), optional :: sStartdate_
+  !f2py character*(*), intent(in), optional :: sEnddate_
+  character(len=*), intent(in), optional :: sObservedSeries_
+  character(len=*), intent(in), optional :: sModeledSeries_
+  character(len=*), intent(in), optional :: sNewTableName_
+  character(len=*), intent(in), optional :: sStartdate_
+  character(len=*), intent(in), optional :: sEnddate_
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iLen1, iLen2, iLen3, iLen4, iLen5
+  integer (kind=T_INT) :: i, j, iCount, iCount1, iCount2, iCount3
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pMODELED_SERIES_NAME, &
+     pOBSERVED_SERIES_NAME, pNEW_TABLE_NAME, pDATE_1, pBASE_SERIES_NAME
+  real (kind=T_SGL), dimension(:), pointer :: pEXPONENT
+
+  character (len=26), dimension(iNUM_C_TABLE_STATS) :: sOptions
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+  character (len=MAXARGLENGTH), dimension(iNUM_C_TABLE_STATS) :: sArgs
+  integer (kind=T_INT), dimension(iNUM_C_TABLE_STATS) :: iOptions
+  integer (kind=T_INT), dimension(:), allocatable :: iActiveOptions
+  real (kind=T_SGL) :: rExponent
+
+  character(len=MAXNAMELENGTH) :: sObservedSeries
+  character(len=MAXNAMELENGTH) :: sModeledSeries
+  character(len=MAXNAMELENGTH) :: sBaseSeries
+  character(len=MAXNAMELENGTH) :: sNewTableName
+  character(len=MAXNAMELENGTH) :: sStartdate
+  character(len=MAXNAMELENGTH) :: sEnddate
+
+  character (len=256) :: sRecord, sItem
+
+  type (T_DATETIME) :: tDATETIME_1, tDATETIME_2
+  type (T_TABLE), pointer :: pNewTable
+  type (T_TIME_SERIES), pointer :: pObservedSeries
+  type (T_TIME_SERIES), pointer :: pModeledSeries
+  type (T_TIME_SERIES), pointer :: pBaseSeries
+
+  ! initialize pointers and other key variables
+  pNewTable => null(); pObservedSeries => null(); pModeledSeries => null()
+  pBaseSeries => null()
+
+  iLen1 = 0; iLen2 = 0; iLen3 = 0; iLen4 = 0; iLen5 = 0
+  sBaseSeries = ""; sObservedSeries = ""; sModeledSeries = ""
+  rExponent = 2.0
+
+  sOptions = ["BIAS                     ", &
+              "STANDARD_ERROR           ", &
+              "PERCENT_BIAS             ", &
+              "RELATIVE_BIAS            ", &
+              "RELATIVE_STANDARD_ERROR  ", &
+              "NASH_SUTCLIFFE           ", &
+              "COEFFICIENT_OF_EFFICIENCY", &
+              "INDEX_OF_AGREEMENT       " ]
+
+  ! get length of strings (if passed in by Python)
+  if(present(sObservedSeries_)) iLen1 = len_trim(sObservedSeries_)
+  if(present(sModeledSeries_)) iLen2 = len_trim(sModeledSeries_)
+  if(present(sNewTableName_)) iLen3 = len_trim(sNewTableName_)
+  if(present(sStartdate_)) iLen4 = len_trim(sStartdate_)
+  if(present(sEnddate_)) iLen5 = len_trim(sEnddate_)
+
+  allocate(pNewTable)
+
+  ! if provided in the call from Python, initialize start and end time as
+  ! called for in the arguments, else set to default values (i.e. select all elements)
+  if(iLen4 > 0) then
+    sRecord = sStartDate
+    call Chomp(sRecord, sItem)
+  else
+    sItem = "01/01/0100"
+  endif
+  call tDATETIME_1%parseDate(sItem)
+
+  if(iLen4 > 0 .and. len_trim(sRecord) > 0) then
+    call tDATETIME_1%parseTime(sRecord)
+  else
+    call tDATETIME_1%parseTime("12:00:00")
+  endif
+  call tDATETIME_1%calcJulianDay()
+
+  if(iLen5 > 0) then
+    sRecord = sEndDate
+    call Chomp(sRecord, sItem)
+  else
+    sItem = "12/31/3000"
+  endif
+  call tDATETIME_2%parseDate(sItem)
+
+  if(iLen5 > 0 .and. len_trim(sRecord) > 0) then
+    call tDATETIME_2%parseTime(sRecord)
+  else
+    call tDATETIME_2%parseTime("12:00:00")
+  endif
+  call tDATETIME_2%calcJulianDay()
+
+  ! initialization complete; begin setting up options, depending on whether we've
+  ! come in from Python or via a TSPROC block
+  do
+    ! Set options for call initiated in Python
+    if(iLen1 > 0 .and. iLen2 > 0 ) then
+
+      sObservedSeries = trim(sObservedSeries_)
+      sModeledSeries = trim(sModeledSeries_)
+
+      if(iLen3 > 0) then
+        pNewTable%sSeriesName = trim(sNewTableName)
+      else
+        pNewTable%sSeriesName = trim(sObservedSeries)//"_CTBL"
+      endif
+
+      ! let's just calculate all the comparison mesures
+      allocate(iActiveOptions(iNUM_C_TABLE_STATS) )
+      do i=1,iNUM_C_TABLE_STATS
+        iActiveOptions(i) = i
+      enddo
+
+    elseif(str_compare(pBlock%sBlockName, "SERIES_COMPARE")) then
+
+      ! set options for call originating from a TSPROC block
+      pDATE_1 => pBlock%getString("DATE_1")
+      if(str_compare(pDATE_1(1),"NA")) then
+        call warn(lFALSE, "No values supplied for DATE_1, and DATE_2; using all data")
+      else
+        ! get DATE_1, TIME_1, DATE_2, TIME_2 if supplied
+        call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
+      endif
+
+      pEXPONENT => pBlock%getReal("EXPONENT")
+      if(pEXPONENT(1) < rNEAR_ZERO) then
+        ! accept default value for rExponent and issue warning
+        call warn(lFALSE, "No EXPONENT specified in the COMPARE_SERIES " &
+          //"block starting at line " &
+          //trim(asChar(pBlock%iStartingLineNumber) ))
+      else
+        rExponent = pEXPONENT(1)
+      endif
+
+      pNEW_TABLE_NAME => pBlock%findString("TABLE_NAME")
+      call assert(.not. str_compare(pNEW_TABLE_NAME(1),"NA"), "No NEW_C_TABLE_NAME " &
+        //"specified in the COMPARE_SERIES block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+      pNewTable%sSeriesName = trim(pNEW_TABLE_NAME(1))
+
+      pBASE_SERIES_NAME => pBlock%getString("BASE_SERIES_NAME")
+      if(str_compare(pBASE_SERIES_NAME(1),"NA")) then
+        deallocate(pBASE_SERIES_NAME)
+        pBASE_SERIES_NAME => pBlock%getString("SERIES_BASE_NAME")
+      endif
+      if(.not. str_compare(pBASE_SERIES_NAME(1),"NA")) &
+              sBaseSeries = trim(pBASE_SERIES_NAME(1))
+
+      pOBSERVED_SERIES_NAME => pBlock%getString("OBSERVED_SERIES_NAME")
+      ! if no success, try the original directive name - maybe this is an older file?
+      if(str_compare(pOBSERVED_SERIES_NAME(1),"NA")) then
+        deallocate(pOBSERVED_SERIES_NAME)
+        pOBSERVED_SERIES_NAME => pBlock%getString("SERIES_NAME_OBS")
+      endif
+      call assert(.not. str_compare(pOBSERVED_SERIES_NAME(1),"NA"), "No OBSERVED_SERIES_NAME " &
+        //"or SERIES_NAME_OBS specified in the COMPARE_SERIES block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+      sObservedSeries = trim(pOBSERVED_SERIES_NAME(1))
+
+      pMODELED_SERIES_NAME => pBlock%getString("MODELED_SERIES_NAME")
+      if(str_compare(pMODELED_SERIES_NAME(1),"NA")) then
+        deallocate(pMODELED_SERIES_NAME)
+        pMODELED_SERIES_NAME => pBlock%getString("SERIES_NAME_SIM")
+      endif
+      call assert(.not. str_compare(pMODELED_SERIES_NAME(1),"NA"), "No MODELED_SERIES_NAME " &
+        //"specified in the COMPARE_SERIES block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__),__LINE__)
+      sModeledSeries = trim(pMODELED_SERIES_NAME(1))
+
+      do i=1,iNUM_C_TABLE_STATS
+        pArgs => pBlock%getString(sOptions(i))
+        call assert(size(pArgs) <= 1, "More than one entry for " &
+          //quote(sOptions(i))//" was found in block starting at line " &
+          //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
+        if(str_compare(pArgs(1), "no") ) then
+          iOptions(i) = 0
+        else
+          iOptions(i) = i
+        endif
+        deallocate(pArgs)
+      enddo
+
+      allocate(iActiveOptions(count(iOptions > 0)) )
+      iActiveOptions = pack(iOptions, iOptions > 0)
+
+      deallocate(pMODELED_SERIES_NAME, pOBSERVED_SERIES_NAME, pNEW_TABLE_NAME, &
+          pDATE_1, pBASE_SERIES_NAME, pEXPONENT)
+
+    else
+      call assert(lFALSE, "Must supply values for MODELED_SERIES_NAME and OBSERVED_SERIES_NAME " &
+        //"*or* compose a valid COMPARE_SERIES block")
+      exit
+    endif
+
+    if(tDATETIME_2 <= tDATETIME_1) then
+      call Assert(lFALSE, &
+        "DATE_2 and TIME_2 ("//trim(tDATETIME_2%listdatetime() )//") must be greater" &
+        //" than DATE_1 and TIME_1 ("//trim(tDATETIME_1%listdatetime() )//")", trim(__FILE__),__LINE__)
+    endif
+
+    ! get pointer to series of interest; restrict to specified date
+    pObservedSeries => TS%getTS( sObservedSeries )
+    pModeledSeries => TS%getTS( sModeledSeries )
+    if(len_trim(sBaseSeries) > 0) pBaseSeries => TS%getTS( sBaseSeries )
+    ! select values within a date range specified by the user
+    iCount1 = pObservedSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+    iCount2 = pModeledSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+
+    call assert(iCount1 == iCount2,"Observed and modeled series cannot be compared " &
+      //"because they have unequal numbers of elements", trim(__FILE__), __LINE__)
+
+    ! check to see that the timestamps are identical between series
+    call assert( TS%datesEqual(sObservedSeries, sModeledSeries), &
+      "Series "//quote(sObservedSeries)//" and "//quote(sModeledSeries) &
+      //" have unequal timesteps in block beginning at " &
+      //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
+
+    if(associated(pBaseSeries) ) then
+
+      iCount3 = pBaseSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+
+      call assert(iCount3 == iCount1,"Base series does not have the same " &
+        //"number of elements as observed and modeled series in block beginning at " &
+      //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
+
+      ! check to see that the timestamps are identical between series
+      call assert( TS%datesEqual(sObservedSeries, sBaseSeries), &
+        "Base series "//quote(sBaseSeries)//" does not have timesteps " &
+        //" equal to those in observed and modeled series in block beginning at " &
+        //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
+    endif
+
+    exit
+  enddo
+
+  call pObservedSeries%findDateMinAndMax()
+  pNewTable%tStartDate = pObservedSeries%tSelectionStartDate
+  pNewTable%tEndDate = pObservedSeries%tSelectionEndDate
+
+!  call pNewTable%calc_c_table(pObservedSeries, pModeledSeries)
+
+  if(associated(pBaseSeries) ) then
+
+    call pNewTable%calc_c_table(pObservedSeries = pObservedSeries, &
+                                pModeledSeries = pModeledSeries, &
+                                iOptions_ = iActiveOptions, &
+                                pBaseSeries_ = pBaseSeries, &
+                                rExponent_ = rExponent)
+  else
+
+    call pNewTable%calc_c_table(pObservedSeries = pObservedSeries, &
+                                pModeledSeries = pModeledSeries, &
+                                iOptions_ = iActiveOptions, &
+                                rExponent_ = rExponent)
+
+  endif
+
+  call TS%add(pNewTable)
+  nullify(pNewTable)
+  nullify(pObservedSeries)
+  nullify(pModeledSeries)
+  nullify(pBaseSeries)
+
+end subroutine series_compare
+
+!------------------------------------------------------------------------------
+
 subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, sEnddate)
 
   !f2py character*(*), intent(in) :: sInputSeriesname
@@ -815,7 +1418,7 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: iLen1, iLen2, iLen3, iLen4, iLen5
-  integer (kind=T_INT) :: i, j, iCount
+  integer (kind=T_INT) :: i, j, iCount, iStat
   integer (kind=T_INT) :: iInterval
   real (kind=T_SGL) :: rInterval
   real (kind=T_SGL) :: rDrainageArea
@@ -840,6 +1443,14 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
   iLen1 = 0; iLen2 = 0; iLen3 = 0; iLen4 = 0; iLen5 = 0
   iHYSEP_TYPE = iFIXED_INTERVAL
   iInterval = 5
+
+  allocate(pNewSeries_BF, stat=iStat)
+  call assert(iStat==0,"Problem allocating memory for baseflow series", &
+    trim(__FILE__), __LINE__)
+  allocate(pNewSeries_SF, stat=iStat)
+  call assert(iStat==0,"Problem allocating memory for surface flow series", &
+    trim(__FILE__), __LINE__)
+
 
   if(present(sInputSeriesName)) iLen1 = len_trim(sInputSeriesName)
   if(present(sHysepType)) iLen2 = len_trim(sHysepType)
@@ -1009,7 +1620,6 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     ! at this point, pNewSeries_SF%tData%rValue holds the total mean daily streamflow
     pNewSeries_SF%tData%rValue = pNewSeries_SF%tData%rValue - pNewSeries_BF%tData%rValue
 
-
     ! ensure that new series have the date range populated
     call pNewSeries_BF%findDateMinAndMax()
     call pNewSeries_SF%findDateMinAndMax()
@@ -1119,6 +1729,10 @@ end subroutine usgs_hysep
 
       call series_equation()
 
+    elseif(str_compare(pBlock%sBlockname,"SERIES_COMPARE")) then
+
+      call series_compare()
+
     elseif(str_compare(pBlock%sBlockname,"HYDROLOGIC_INDICES")) then
 
       call hydrologic_indices()
@@ -1161,7 +1775,7 @@ end subroutine usgs_hysep
 
     elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_NWIS")) then
 
-      call read_USGS_NWIS(pBlock, TS)
+      call get_mul_series_usgs_nwis(pBlock, TS)
 
     elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_SSF")) then
 
@@ -1178,6 +1792,10 @@ end subroutine usgs_hysep
     elseif(str_compare(pBlock%sBlockname,"USGS_HYSEP")) then
 
       call usgs_hysep()
+
+    elseif(str_compare(pBlock%sBlockname,"DIGITAL_FILTER")) then
+
+      call digital_filter()
 
     elseif(str_compare(pBlock%sBlockname,"INACTIVE")) then
 
@@ -1280,7 +1898,7 @@ subroutine series_equation()
   else
 
     call Assert(lFALSE, "Unhandled exception -- perhaps this subroutine called" &
-      //" without being passed a valid SERIES_DIFFERENCE block?", &
+      //" without being passed a valid SERIES_EQUATION block?", &
       trim(__FILE__), __LINE__)
 
   endif
@@ -1312,17 +1930,22 @@ end subroutine datestampsequal
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTS
-    type (T_TABLE) :: tTable
-    integer (kind=T_INT) :: n
+    type (T_TABLE), pointer :: pTable
+    integer (kind=T_INT) :: n, iStat
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
     character (len=MAXARGLENGTH) :: sTempSeriesname
+
+    allocate(pTable, stat=iStat)
+    call assert(iStat == 0, "Failed to allocate memory for table in " &
+      //"VOLUME_CALCULATION block starting at line " &
+      //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
 
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
       pTS =>TS%getTS(sSeriesName)
 
       ! don't pass along the block object; use defaults
-      call tTable%calc_v_table(pTS)
+      call pTable%calc_v_table(pTS)
 
     elseif(str_compare(pBlock%sBlockName, "VOLUME_CALCULATION")) then
 
@@ -1334,7 +1957,7 @@ end subroutine datestampsequal
         trim(__FILE__), __LINE__)
 
       pTS => TS%getTS( sTempSeriesname )
-      call tTable%calc_v_table(pTS, pBlock)
+      call pTable%calc_v_table(pTS, pBlock)
 
     else
 
@@ -1343,7 +1966,7 @@ end subroutine datestampsequal
 
     endif
 
-    call TS%add(tTable)
+    call TS%add(pTable)
     nullify(pTS)
 
   end subroutine volume_calculation
@@ -1558,6 +2181,8 @@ end subroutine evaluate
 
 subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
+  ! TODO: This routine needs cleanup!
+
   implicit none
   !f2py character*(*), intent(in) :: sFunctionText
   !f2py character*(*), intent(in) :: sSeriesName
@@ -1586,6 +2211,12 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
   character (len=256) :: sPreviousSeriesName
   real (kind=T_SGL), dimension(:), allocatable :: rOut
 
+  type T_TIME_SERIES_PTR
+    type (T_TIME_SERIES), pointer :: pTS
+  end type T_TIME_SERIES_PTR
+
+  type (T_TIME_SERIES_PTR), dimension(:), allocatable :: tTSCOL
+
   sNameTxt = trim(sSeriesName)
   sFuncTxt = ""
 
@@ -1594,6 +2225,7 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
   iNumFields = countFields(trim(sTimeSeriesList))
   allocate(sSeriesNamesTxt(iNumFields))
   sSeriesNamesTxt = ""
+  ! parse names of current time series into seperate entries
   do i=1,iNumFields
     call Chomp(sTimeSeriesList, sSeriesNamesTxt(i) )
   enddo
@@ -1602,6 +2234,7 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
   sBuf = sFuncTxt
   iNumFields = countFields(trim(sFuncTxt),OPERATORS//" ")
   allocate(sVarTxt(iNumFields), lInclude(iNumFields) )
+  allocate (tTSCOL(iNumFields) )
   lInclude = lFALSE
   lConsistentTimebase = lTRUE
 
@@ -1610,9 +2243,10 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
     call Chomp(sBuf, sVarTxt(i) , OPERATORS//" ")
     if(isElement(sVarTxt(i), sSeriesNamesTxt)) then
       iNumSeries = iNumSeries + 1
-      pTempSeries => TS%getTS( sVarTxt(i) )
-      iNumRecords = size(pTempSeries%tData)
-      call TSCOL%add( pTempSeries )
+!      pTempSeries => TS%getTS( sVarTxt(i) )
+      tTSCOL(i)%pTS => TS%getTS( sVarTxt(i) )
+      iNumRecords = size(tTSCOL(i)%pTS%tData)
+!      call TSCOL%add( pTempSeries )
       lInclude(i) = lTRUE
       if(iNumSeries>1) then
         call datestampsequal(sPreviousSeriesName, sVarTxt(i), lConsistentTimebase )
@@ -1647,16 +2281,29 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
       do i=1,iNumRecords
         do j=1,count(lInclude)
-          rTempValue(j) = TSCOL%pTS(j)%tData(i)%rValue
+!          rTempValue(j) = TSCOL%pTS(j)%tData(i)%rValue
+           rTempValue(j) = tTSCOL(j)%pTS%tData(i)%rValue
         enddo
 !      print *, '  IN:', rTempValue
-        rOut(i) = evaluate_expression (rTempValue , TSCOL%pTS(1)%tData(i)%tDT )
+!        rOut(i) = evaluate_expression (rTempValue , TSCOL%pTS(1)%tData(i)%tDT )
+        rOut(i) = evaluate_expression (rTempValue , tTSCOL(1)%pTS%tData(i)%tDT )
 !      print *, '  OUT:', rOut(i)
       enddo
 
+      allocate(pNewSeries)
+
       call pNewSeries%new( sNameTxt, &
-        "Series calculated from the equation '"//trim(sFunctionText)//"'", &
-        TSCOL%pTS(1)%tData%tDT, rOut)
+        "Series calculated from the equation "//quote(sFunctionText), &
+!        TSCOL%pTS(1)%tData%tDT, rOut)
+        tTSCOL(1)%pTS%tData%tDT, rOut)
+
+      print *, quote(pNewSeries%sSeriesName)
+      print *, quote(pNewSeries%sDescription)
+
+      ! must nullify these pointers or else we hose the existing list of TS objects
+      ! when TS%add is called
+      pNewSeries%pNext => null()
+      pNewSeries%pPrevious => null()
 
       call TS%add(pNewSeries)
 
@@ -1678,9 +2325,10 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
   nullify(pNewSeries)
   nullify(pTempSeries)
+  deallocate(tTSCOL)
   deallocate(sVarTxt)
   call destroyfunc()
-  call TSCOL%clear()
+!  call TSCOL%clear()
 
 end subroutine newseriesfromequation
 
@@ -1765,15 +2413,16 @@ subroutine period_statistics()
     type (T_TIME_SERIES), pointer, dimension(:) :: pStatSeries
     type (T_TIME_SERIES), pointer :: pTempStatSeries
     integer (kind=T_INT) :: i
-    character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
+    character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME
     character (len=MAXARGLENGTH) :: sTempSeriesname
-
-
 
     if(str_compare(pBlock%sBlockName, "PERIOD_STATISTICS")) then
 
-      pArgs =>pBlock%getString("SERIES_NAME")
-      sTempSeriesname = pArgs(1)
+      pSERIES_NAME =>pBlock%getString("SERIES_NAME")
+      call assert(.not. str_compare(pSERIES_NAME(1),"NA"), "SERIES_NAME must be supplied " &
+        //"in PERIOD_STATISTICS block starting at line " &
+        //trim(asChar(pBlock%iStartingLineNumber)), trim(__FILE__),__LINE__)
+      sTempSeriesname = pSERIES_NAME(1)
       pBaseTS => TS%getTS( sTempSeriesname )
       pStatSeries => pBaseTS%calcPeriodStatistics( pBlock)
 
@@ -1791,6 +2440,7 @@ subroutine period_statistics()
 
     enddo
 
+    deallocate(pSERIES_NAME)
     nullify(pBaseTS)
     nullify(pTempStatSeries)
 

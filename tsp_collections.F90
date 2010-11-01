@@ -32,29 +32,30 @@ module tsp_collections
     integer (kind=T_INT) :: iNumTableComparisons = 0
 
     type (T_TIME_SERIES), dimension(:), pointer :: pTS => null()
-    type (T_TIME_SERIES), pointer :: pTSm => null()
+    type (T_TIME_SERIES), pointer :: pTS_Head => null()
     type (T_TS_COMPARISON), dimension(:), allocatable :: tTSComparison
     type (T_TABLE), dimension(:), allocatable :: tTable
+    type (T_TABLE), pointer :: pTable_Head => null()
     type (T_TABLE_COMPARISON), dimension(:), allocatable :: tTableComparison
 
   contains
 
 !    procedure :: add_ts_sub, add_table_sub
-    procedure :: add_ts_link_sub, add_table_sub
+    procedure :: add_ts_link_sub, add_table_link_sub
     procedure :: tsCompare => add_ts_comparison_sub
     procedure :: tableCompare => add_table_comparison_sub
-    generic :: add => add_ts_link_sub, add_table_sub
+    generic :: add => add_ts_link_sub, add_table_link_sub
     procedure :: clear => remove_all_sub
     procedure :: calculate => calc_values_from_equation_fn
     procedure :: newTimeBase => conform_ts_sub
     procedure :: removeTS => remove_ts_link_sub
-    procedure :: removeTable => remove_table_sub
+    procedure :: removeTable => remove_table_link_sub
     procedure :: summarize => summarize_sub
     procedure :: describe => describe_ts_sub
     procedure :: getTS => get_ts_pointer_link_fn
     procedure :: getTSComparison => get_ts_comparison_pointer_fn
     procedure :: getTableComparison => get_table_comparison_pointer_fn
-    procedure :: getTable => get_table_pointer_fn
+    procedure :: getTable => get_table_pointer_link_fn
     procedure :: listTS => list_output_ts_sub
     procedure :: pestWriteTSComparison => pest_write_ts_comparison_sub
     procedure :: pestWriteTableComparison => pest_write_table_comparison_sub
@@ -71,20 +72,55 @@ contains
     type(T_TIME_SERIES), pointer ::  pNewSeries
 
     ! [ LOCALS ]
-    type(T_TIME_SERIES), pointer :: pCurrentTS => null()
+    type(T_TIME_SERIES), pointer :: pCurrentTS
     integer (kind=T_INT) :: iCount
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: i
+    integer (kind=T_INT) :: iIteration
 
-    if(associated(this%pTSm)) then
-      pCurrentTS => this%pTSm
+    pNewSeries%pNext => null()
+    pNewSeries%pPrevious => null()
+    pCurrentTS => null()
+
+    print *, "associated(this%pTS_Head): ",associated(this%pTS_Head)
+    if(associated(this%pTS_Head)) print *, quote(this%pTS_Head%sSeriesName)
+
+    if(.not. associated(this%pTS_Head)) then  ! no series are stored yet; set head node to
+                                              ! pNewSeries
+      this%pTS_Head => pNewSeries
+      print *, "associated(this%pTS_Head): ",associated(this%pTS_Head)
+      this%pTS_Head%pNext => null()
+      this%pTS_Head%pPrevious => null()
+      this%iNumTimeSeries = this%iNumTimeSeries + 1
+
+      call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
+        //"There is now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
+      call echolog("")
+
+    else
+
+      iIteration = 0
+
+      ! reset pCurrentTS to the head node
+      pCurrentTS => this%pTS_Head
+
       do
+
+        iIteration = iIteration + 1
+        print *, trim(asChar(iIteration))//") "//quote(pCurrentTS%sSeriesName)
+        if(associated(pCurrentTS%pPrevious)) print *,quote(pCurrentTS%pPrevious%sSeriesName)//"<=="
+        if(associated(pCurrentTS%pNext)) print *,"                  ==>"//quote(pCurrentTS%pNext%sSeriesName)
+
         ! recurse through list until we come to the end of the line
         if(associated(pCurrentTS%pNext) ) then
           pCurrentTS => pCurrentTS%pNext
           cycle
         else
           ! update forward-pointing and backward-pointing pointers
+          if(associated(pNewSeries%pPrevious)) then
+            call warn(lFALSE,"pNewSeries is being reallocated")
+            print *, " (was: "//quote(pNewSeries%pPrevious%sSeriesName)//")"
+          endif
           pCurrentTS%pNext => pNewSeries
           pNewSeries%pPrevious => pCurrentTS
           pNewSeries%pNext => null()
@@ -92,20 +128,19 @@ contains
           call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
             //"There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
           call echolog("")
+                  print *, trim(asChar(iIteration))//") "//quote(pCurrentTS%sSeriesName)
+          print *, "NEW SERIES ADDED"
+          print *, "  current series:"//quote(pCurrentTS%sSeriesName)
+          if(associated(pCurrentTS%pPrevious)) print *,quote(pCurrentTS%pPrevious%sSeriesName)//"<=="
+          if(associated(pCurrentTS%pNext)) print *,"                  ==>"//quote(pCurrentTS%pNext%sSeriesName)
+
+          print *, "  new series:"//quote(pNewSeries%sSeriesName)
+          if(associated(pNewSeries%pPrevious)) print *,"  "//quote(pNewSeries%pPrevious%sSeriesName)//"<=="
+          if(associated(pNewSeries%pNext)) print *,"                    ==>"//quote(pNewSeries%pNext%sSeriesName)
 
           exit
         endif
       enddo
-    else
-      this%pTSm => pNewSeries
-      this%pTSm%pNext => null()
-      this%pTSm%pPrevious => null()
-      this%iNumTimeSeries = this%iNumTimeSeries + 1
-      pCurrentTS => this%pTSm
-
-      call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
-        //"There is now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
-      call echolog("")
 
     endif
 
@@ -113,6 +148,57 @@ contains
     nullify(pCurrentTS)
 
   end subroutine add_ts_link_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine add_table_link_sub(this, pNewTable)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    type(T_TABLE), pointer ::  pNewTable
+
+    ! [ LOCALS ]
+    type(T_TABLE), pointer :: pCurrentTable => null()
+    integer (kind=T_INT) :: iCount
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i
+
+    if(associated(this%pTable_Head)) then
+      pCurrentTable => this%pTable_Head
+      do
+        ! recurse through list until we come to the end of the line
+        if(associated(pCurrentTable%pNext) ) then
+          pCurrentTable => pCurrentTable%pNext
+          cycle
+        else
+          ! update forward-pointing and backward-pointing pointers
+          pCurrentTable%pNext => pNewTable
+          pNewTable%pPrevious => pCurrentTable
+          pNewTable%pNext => null()
+          this%iNumTables = this%iNumTables + 1
+          call echolog("  Added table "//quote(pNewTable%sSeriesName)//". " &
+            //"There are now "//trim(asChar(this%iNumTables))//" tables in memory.")
+          call echolog("")
+
+          exit
+        endif
+      enddo
+    else
+      this%pTable_Head => pNewTable
+      this%pTable_Head%pNext => null()
+      this%pTable_Head%pPrevious => null()
+      this%iNumTables = this%iNumTables + 1
+      pCurrentTable => this%pTable_Head
+
+      call echolog("  Added table "//quote(pNewTable%sSeriesName)//". " &
+        //"There is now "//trim(asChar(this%iNumTables))//" table in memory.")
+      call echolog("")
+
+    endif
+
+    nullify(pNewTable)
+    nullify(pCurrentTable)
+
+  end subroutine add_table_link_sub
 
 !------------------------------------------------------------------------------
 
@@ -292,20 +378,16 @@ contains
 
     lMatch = lFALSE
 
-    if(associated(this%pTSm)) then
+    if(associated(this%pTS_Head)) then
 
       ! start at head of linked list
-      pCurrent => this%pTSm
+      pCurrent => this%pTS_Head
       do
 
         if(.not. associated(pCurrent) ) then
           exit
 
         elseif(str_compare(pCurrent%sSeriesName, sSeriesName) ) then
-
-        print *, quote(pCurrent%sSeriesName)
-        print *, "  pPrevious: ", associated(pCurrent%pPrevious)
-        print *, "  pNext: ", associated(pCurrent%pNext)
 
           ! reset pointers away/around object to be deleted
           pPrevious => pCurrent%pPrevious
@@ -315,7 +397,7 @@ contains
             ! if the pPrevious pointer is null, it means we're at the
             ! head of the list; need to redefine the head of the list
             ! within the TS data structure
-            this%pTSm => pCurrent%pNext
+            this%pTS_Head => pCurrent%pNext
           endif
 
           pNext => pCurrent%pNext
@@ -323,7 +405,10 @@ contains
           deallocate(pCurrent%tData, stat=iStat)
           call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
             trim(__FILE__), __LINE__)
-          deallocate(pCurrent)
+          deallocate(pCurrent, stat=iStat)
+          call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
+            trim(__FILE__), __LINE__)
+
           lMatch = lTRUE
           this%iNumTimeSeries = this%iNumTimeSeries - 1
 
@@ -344,26 +429,88 @@ contains
     endif
 
 
-    print *
-
-        pCurrent => this%pTSm
-
-      if(associated(pCurrent)) then
-        do
-
-          print *, quote(pCurrent%sSeriesName)
-          print *, "  pPrevious: ", associated(pCurrent%pPrevious)
-          print *, "  pNext: ", associated(pCurrent%pNext)
-
-          if(.not. associated(pCurrent%pNext) ) then
-            exit
-          else
-            pCurrent => pCurrent%pNext
-          endif
-        enddo
-      endif
+!    pCurrent => this%pTS_Head
+!
+!      if(associated(pCurrent)) then
+!        do
+!          if(.not. associated(pCurrent%pNext) ) then
+!            exit
+!          else
+!            pCurrent => pCurrent%pNext
+!          endif
+!        enddo
+!      endif
 
   end subroutine remove_ts_link_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine remove_table_link_sub(this, sSeriesName)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sSeriesName
+
+    ! [ LOCALS ]
+    type(T_TABLE), pointer :: pCurrent
+    type(T_TABLE), pointer :: pPrevious
+    type(T_TABLE), pointer :: pNext
+    logical (kind=T_LOGICAL) :: lMatch
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i
+
+    lMatch = lFALSE
+
+    if(associated(this%pTable_Head)) then
+
+      ! start at head of linked list
+      pCurrent => this%pTable_Head
+      do
+
+        if(.not. associated(pCurrent) ) then
+          exit
+
+        elseif(str_compare(pCurrent%sSeriesName, sSeriesName) ) then
+
+          ! reset pointers away/around object to be deleted
+          pPrevious => pCurrent%pPrevious
+          if(associated(pPrevious)) then
+            pPrevious%pNext => pCurrent%pNext
+          else
+            ! if the pPrevious pointer is null, it means we're at the
+            ! head of the list; need to redefine the head of the list
+            ! within the TS data structure
+            this%pTable_Head => pCurrent%pNext
+          endif
+
+          pNext => pCurrent%pNext
+          if(associated(pNext)) pNext%pPrevious => pCurrent%pPrevious
+          deallocate(pCurrent%tTableData, stat=iStat)
+          call Assert(iStat==0, "Problem deallocating memory while removing a table", &
+            trim(__FILE__), __LINE__)
+          deallocate(pCurrent, stat=iStat)
+          call Assert(iStat==0, "Problem deallocating memory while removing a table", &
+            trim(__FILE__), __LINE__)
+
+          lMatch = lTRUE
+          this%iNumTables = this%iNumTables - 1
+
+          call echolog("Removed table "//quote(sSeriesName)//". " &
+            //trim(asChar(this%iNumTables))//" table remaining.")
+
+          exit
+        else
+          pCurrent => pCurrent%pNext
+        endif
+      enddo
+
+      call warn(lMatch, "Unable to find series "//quote(sSeriesName)//" for removal", &
+        trim(__FILE__), __LINE__)
+    else
+      call warn(lFALSE,"There are no series objects in memory. Unable to remove series " &
+        //quote(sSeriesName), trim(__FILE__), __LINE__)
+    endif
+
+  end subroutine remove_table_link_sub
 
 !------------------------------------------------------------------------------
 
@@ -626,10 +773,10 @@ contains
 
     lMatch = lFALSE
 
-    if(associated(this%pTSm)) then
+    if(associated(this%pTS_Head)) then
 
       ! start at head of linked list
-      pCurrent => this%pTSm
+      pCurrent => this%pTS_Head
       do
         if(.not. associated(pCurrent) ) exit
 
@@ -644,8 +791,13 @@ contains
         endif
       enddo
 
-      call warn(lMatch, "Unable to find series "//quote(sSeriesName)//".", &
+      if(.not. lMatch) then
+        call this%summarize()
+        call assert(lFALSE,"Unable to find series "//quote(sSeriesName)//".", &
         trim(__FILE__), __LINE__)
+      endif
+!      call assert(lMatch, "Unable to find series "//quote(sSeriesName)//".", &
+!        trim(__FILE__), __LINE__)
     else
       call warn(lFALSE,"There are no series objects in memory. Unable to obtain pointer to series " &
         //quote(sSeriesName), trim(__FILE__), __LINE__)
@@ -657,6 +809,56 @@ contains
     nullify(pCurrent)
 
   end function get_ts_pointer_link_fn
+
+!------------------------------------------------------------------------------
+
+  function get_table_pointer_link_fn(this, sSeriesName)    result( pTable )
+
+    ! get a pointer to a table from a COLLECTION of time series objects (this)
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sSeriesName
+    type(T_TABLE), pointer :: pTable
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iCount
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: i, j
+    logical (kind=T_LOGICAL) :: lMatch
+    type(T_TABLE), pointer :: pCurrent => null()
+
+    lMatch = lFALSE
+
+    if(associated(this%pTable_Head)) then
+
+      ! start at head of linked list
+      pCurrent => this%pTable_Head
+      do
+        if(.not. associated(pCurrent) ) exit
+
+        if(str_compare(pCurrent%sSeriesName, sSeriesName) ) then
+          lMatch = lTRUE
+          pTable => pCurrent
+          exit
+        elseif(.not. associated(pCurrent%pNext) ) then
+          exit
+        else
+          pCurrent => pCurrent%pNext
+        endif
+      enddo
+
+      call warn(lMatch, "Unable to find table "//quote(sSeriesName)//".", &
+        trim(__FILE__), __LINE__)
+    else
+      call warn(lFALSE,"There are no table objects in memory. Unable to obtain pointer to table " &
+        //quote(sSeriesName), trim(__FILE__), __LINE__)
+
+      pTable => null()
+
+    endif
+
+    nullify(pCurrent)
+
+  end function get_table_pointer_link_fn
 
 !------------------------------------------------------------------------------
 
@@ -797,15 +999,16 @@ contains
     type(T_TIME_SERIES), pointer :: pCurrentTS => null()
     type (T_TABLE), pointer :: pObservedTable => null()
     type (T_TABLE), pointer :: pModeledTable => null()
+    type (T_TABLE), pointer :: pCurrentTable => null()
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
       fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
            t80,'MAX',t86,'MEMORY(kb)',/)")
 
-    if(associated(this%pTSm)) then
+    if(associated(this%pTS_Head)) then
 
-      pCurrentTS => this%pTSm
+      pCurrentTS => this%pTS_Head
 
       do
 
@@ -840,68 +1043,108 @@ contains
 
     endif
 
-    if(.not. associated(this%pTS)) then
-      write(LU_STD_OUT,fmt="(a,/)") '     ===> No TIME SERIES objects currently in memory <==='
+!     if(.not. associated(this%pTS)) then
+!       write(LU_STD_OUT,fmt="(a,/)") '     ===> No TIME SERIES objects currently in memory <==='
+!
+!     else
+!
+!       iCount = size(this%pTS)
+!
+!       iSum = 0
+!       do i=1,iCount
+!
+!         if(allocated(this%pTS(i)%tData)) then
+!           iMemoryInBytes = sizeof(this%pTS(i)) + sizeof(this%pTS(i)%tData)
+!           write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
+!             this%pTS(i)%sSeriesName, &
+!             this%pTS(i)%tStartDate%prettyDate(), &
+!             this%pTS(i)%tEndDate%prettyDate(), &
+!             size(this%pTS(i)%tData), &
+!             MINVAL(this%pTS(i)%tData%rValue), &
+!             SUM(this%pTS(i)%tData%rValue)/ size(this%pTS(i)%tData), &
+!             MAXVAL(this%pTS(i)%tData%rValue), &
+!             iMemoryInBytes / 1024
+!             iSum = iSum + size(this%pTS(i)%tData)
+!         else
+!           iMemoryInBytes = sizeof(this%pTS(i))
+!
+!           write(LU_STD_OUT,fmt="(a,t20,51x,i6,'k')") &
+!             this%pTS(i)%sSeriesName, iMemoryInBytes / 1024
+!
+!         endif
+!       end do
+!
+!       write(LU_STD_OUT, fmt="(/,a,/)") trim(asChar(iSum))//" total records in memory."
+!
+!     endif
 
-    else
+!     if(.not. allocated(this%tTable)) then
+!       write(LU_STD_OUT,fmt="(/,a,/)") '     ===> No TABLE objects currently in memory <==='
+!
+!     else
+!
+!       iCount = size(this%tTable)
+!
+!       write(LU_STD_OUT, &
+!         fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
+!
+!
+!       do i=1,iCount
+!
+!         if(allocated(this%tTable(i)%tTableData)) then
+!           iMemoryInBytes = sizeof(this%tTable(i)) + sizeof(this%tTable(i)%tTableData)
+!           write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
+!             this%tTable(i)%sSeriesName, &
+!             this%tTable(i)%tStartDate%prettyDate(), &
+!             this%tTable(i)%tEndDate%prettyDate(), &
+!             TABLE_TYPE(this%tTable(i)%iTableType)
+!
+!         else
+!
+!
+!         endif
+!       end do
+!     endif
 
-      iCount = size(this%pTS)
-
-      iSum = 0
-      do i=1,iCount
-
-        if(allocated(this%pTS(i)%tData)) then
-          iMemoryInBytes = sizeof(this%pTS(i)) + sizeof(this%pTS(i)%tData)
-          write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
-            this%pTS(i)%sSeriesName, &
-            this%pTS(i)%tStartDate%prettyDate(), &
-            this%pTS(i)%tEndDate%prettyDate(), &
-            size(this%pTS(i)%tData), &
-            MINVAL(this%pTS(i)%tData%rValue), &
-            SUM(this%pTS(i)%tData%rValue)/ size(this%pTS(i)%tData), &
-            MAXVAL(this%pTS(i)%tData%rValue), &
-            iMemoryInBytes / 1024
-            iSum = iSum + size(this%pTS(i)%tData)
-        else
-          iMemoryInBytes = sizeof(this%pTS(i))
-
-          write(LU_STD_OUT,fmt="(a,t20,51x,i6,'k')") &
-            this%pTS(i)%sSeriesName, iMemoryInBytes / 1024
-
-        endif
-      end do
-
-      write(LU_STD_OUT, fmt="(/,a,/)") trim(asChar(iSum))//" total records in memory."
-
-    endif
-
-    if(.not. allocated(this%tTable)) then
+    if(.not. associated(this%pTable_Head)) then
       write(LU_STD_OUT,fmt="(/,a,/)") '     ===> No TABLE objects currently in memory <==='
 
     else
 
-      iCount = size(this%tTable)
 
       write(LU_STD_OUT, &
         fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
 
 
-      do i=1,iCount
+      pCurrentTable => this%pTable_Head
 
-        if(allocated(this%tTable(i)%tTableData)) then
-          iMemoryInBytes = sizeof(this%tTable(i)) + sizeof(this%tTable(i)%tTableData)
+      do
+
+        if(allocated(pCurrentTable%tTableData)) then
+          iMemoryInBytes = sizeof(pCurrentTable) + sizeof(pCurrentTable%tTableData)
           write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
-            this%tTable(i)%sSeriesName, &
-            this%tTable(i)%tStartDate%prettyDate(), &
-            this%tTable(i)%tEndDate%prettyDate(), &
-            TABLE_TYPE(this%tTable(i)%iTableType)
+            pCurrentTable%sSeriesName, &
+            pCurrentTable%tStartDate%prettyDate(), &
+            pCurrentTable%tEndDate%prettyDate(), &
+            TABLE_TYPE(pCurrentTable%iTableType)
 
         else
-
+          write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
+            pCurrentTable%sSeriesName, '***', '***', '***'
 
         endif
+
+        ! recurse through list until we come to the end of the line
+        if(associated(pCurrentTable%pNext) ) then
+          pCurrentTable => pCurrentTable%pNext
+          cycle
+        else
+          exit
+        endif
+
       end do
     endif
+
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE COMPARISON OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &

@@ -366,7 +366,7 @@ function real2char_wsf(rValue, iWidth, iSignificantFigures)  result(sBuf)
 
   write(UNIT=sBuf,FMT=sFormat) rValue
 
-  sBuf = ADJUSTR(sBuf)
+  sBuf = ADJUSTL(sBuf)
 
 end function real2char_wsf
 

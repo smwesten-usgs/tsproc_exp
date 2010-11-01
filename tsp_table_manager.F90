@@ -34,6 +34,8 @@ module tsp_table_manager
 !  end type T_VTABLE_DATA
 
   type, public :: T_TABLE
+    type (T_TABLE), pointer :: pNext => null()
+    type (T_TABLE), pointer :: pPrevious => null()
     character (len=MAXNAMELENGTH) :: sSeriesName = ""
     character (len=256) :: sDescription = ""
     character (len=256) :: sHeader = ""
@@ -47,6 +49,7 @@ module tsp_table_manager
 
     procedure, public :: calc_s_table => table_calc_s_table
     procedure, public :: calc_e_table => table_calc_e_table
+    procedure, public :: calc_c_table => table_calc_c_table
     procedure, public :: calc_v_table => table_calc_v_table
     procedure, public :: calc_i_table => table_calc_i_table
     procedure, public :: list => table_list_output_sub
@@ -81,6 +84,202 @@ contains
       trim(__FILE__), __LINE__)
 
   end subroutine new_table_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine table_calc_c_table(this, pObservedSeries, pModeledSeries, iOptions_, &
+      pBaseSeries_, rExponent_)
+
+    class (T_TABLE) :: this
+    type (T_TIME_SERIES), pointer :: pObservedSeries
+    type (T_TIME_SERIES), pointer :: pModeledSeries
+    integer (kind=T_INT), dimension(:), optional :: iOptions_
+    type (T_TIME_SERIES), pointer, optional :: pBaseSeries_
+    real (kind=T_SGL), optional :: rExponent_
+
+    ! [ LOCALS ]
+
+    ! locals to hold either default or user-defined values
+    integer (kind=T_INT), dimension(:), allocatable :: iOptions
+    real (kind=T_SGL) :: rExponent
+    integer (kind=T_INT) :: i, j, iCount
+    real (kind=T_DBL) :: rCount
+    real (kind=T_SGL), dimension(:), allocatable :: rObservedValues
+    real (kind=T_SGL), dimension(:), allocatable :: rModeledValues
+    real (kind=T_SGL), dimension(:), allocatable :: rBaseValues
+    real (kind=T_DBL) :: rSum1, rSum2, rSum3, rSum4, rSum5, rSum6, rSum7, rDelta
+    integer (kind=T_INT), parameter :: iNUMBER_OF_DESCRIPTIVE_LINES = 6
+
+    this%iTableType = iCTABLE
+
+    ! zero out accumulators
+    rSum1=rD_ZERO; rSum2=rD_ZERO; rSum3=rD_ZERO; rSum4=rD_ZERO
+    rSum5=rD_ZERO; rSum6 = rD_ZERO; rSum7 = rD_ZERO; rDelta=rD_ZERO
+
+    if(present(iOptions_) ) then
+      allocate(iOptions(size(iOptions_)) )
+      iOptions = iOptions_
+    else
+      allocate(iOptions( iNUM_C_TABLE_STATS) )
+        do i=1,iNUM_C_TABLE_STATS
+          iOptions(i) = i
+        enddo
+    endif
+
+    if(present(rExponent_) ) then
+      rExponent = rExponent_
+    else
+      rExponent = 1.0
+    endif
+
+    ! time series for which statistics are to be calculated may have different numbers
+    ! of elements, although the selected elements should be idential; need to make a copy
+    allocate(rObservedValues(count(pObservedSeries%tData%lSelect) ) )
+    allocate(rModeledValues(count(pModeledSeries%tData%lSelect) ) )
+    rObservedValues = pack(pObservedSeries%tData%rValue, pObservedSeries%tData%lSelect)
+    rModeledValues = pack(pModeledSeries%tData%rValue, pModeledSeries%tData%lSelect)
+
+    ! if an argument was supplied for SERIES_BASE_NAME, we allocate space for it
+    if(present(pBaseSeries_)) then
+      allocate(rBaseValues(count(pBaseSeries_%tData%lSelect) ) )
+      rBaseValues = pack(pBaseSeries_%tData%rValue, pBaseSeries_%tData%lSelect)
+    endif
+
+    ! allocate memory for TABLE object
+    allocate(this%tTableData( size(iOptions) + iNUMBER_OF_DESCRIPTIVE_LINES ) )
+
+    ! first, populate the descriptive lines of the table (series names, dates)
+    this%tTableData(1)%sDescription = "Observation time series name: "
+    this%tTableData(1)%sValue(1) = pObservedSeries%sSeriesName
+    this%tTableData(2)%sDescription = "Modeled time series name: "
+    this%tTableData(2)%sValue(1) = pModeledSeries%sSeriesName
+    this%tTableData(3)%sDescription = "Starting date of series comparison: "
+    this%tTableData(3)%sValue(1) = this%tStartDate%listdate()
+    this%tTableData(4)%sDescription = "Starting time of series comparison: "
+    this%tTableData(4)%sValue(1) = this%tStartDate%listtime()
+    this%tTableData(5)%sDescription = "Ending date of series comparison: "
+    this%tTableData(5)%sValue(1) = this%tEndDate%listdate()
+    this%tTableData(6)%sDescription = "Ending time of series comparison: "
+    this%tTableData(6)%sValue(1) = this%tEndDate%listtime()
+
+    ! we shouldn't really need to check lengths at this point, but better safe than sorry
+    call assert(size(rObservedValues) == size(rModeledValues), &
+      "Internal programming error - unequal array sizes in C-table calculation", &
+      trim(__FILE__), __LINE__)
+
+    iCount = size(rObservedValues)
+    rCount = real(iCount, kind=T_DBL)
+
+    ! calculate base statistics from which the selected comparison measures will be derived
+    do i=1, iCount
+      rDelta = rModeledValues(i) - rObservedValues(i)
+      rSum1 = rSum1 + rDelta
+      rSum2 = rSum2 + (rDelta * rDelta)
+      rSum3 = rSum3 + rObservedValues(i)
+      rSum4 = rSum4 + abs( rDelta ) ** rExponent
+    enddo
+
+    rSum3 = rSum3 / iCount
+
+    ! this calculation needed for Nash-Sutcliffe
+    do i=1, iCount
+      rDelta = rObservedValues(i) - rSum3
+      rSum5 = rSum5 + ( rDelta * rDelta )   ! note the reuse of rDelta!
+    enddo
+
+    if(allocated(rBaseValues)) then
+      do i=1,iCount
+        rDelta = abs(rObservedValues(i) - rBaseValues(i)) ** rExponent
+        rSum6 = rSum6 + rDelta
+        rDelta = ( abs(rObservedValues(i) - rBaseValues(i)) &
+                  + abs(rModeledValues(i) - rBaseValues(i)) ) ** rExponent
+        rSum7 = rSum7 + rDelta
+      enddo
+    else
+      do i=1,iCount
+        rDelta = abs(rObservedValues(i) - rSum3) ** rExponent
+        rSum6 = rSum6 + rDelta
+        rDelta = ( abs(rObservedValues(i) - rSum3) &
+                  + abs(rModeledValues(i) - rSum3) ) ** rExponent
+        rSum7 = rSum7 + rDelta
+      enddo
+    endif
+
+    do i=1, size(iOptions)
+
+      j = i + iNUMBER_OF_DESCRIPTIVE_LINES
+
+      select case(iOptions(i) )
+
+        case(BIAS)
+
+          this%tTableData(j)%sDescription = "Bias: "
+          this%tTableData(j)%sValue(1) = asChar( rSum1 / rCount )
+
+        case(STANDARD_ERROR)
+
+          this%tTableData(j)%sDescription = "Standard error: "
+          this%tTableData(j)%sValue(1) = asChar( sqrt( rSum2 / (rCount - 1.) ) )
+
+        case(PERCENT_BIAS)
+
+          this%tTableData(j)%sDescription = "Percent bias: "
+          this%tTableData(j)%sValue(1) = asChar( rSum1 / rCount / rSum3 * 100. )
+
+        case(RELATIVE_BIAS)
+
+          this%tTableData(j)%sDescription = "Relative bias: "
+          if(rSum3 < rNEAR_ZERO) then
+            this%tTableData(j)%sValue(1) = asChar( -HUGE(rExponent) )
+          else
+            this%tTableData(j)%sValue(1) = asChar( rSum1 / rCount / rSum3 )
+          endif
+
+        case(RELATIVE_STD_ERROR)
+
+          this%tTableData(j)%sDescription = "Relative standard error: "
+          this%tTableData(j)%sValue(1) = asChar( sqrt( rSum2 / (rCount - 1.) ) &
+              / sqrt( rSum5 / (rCount - 1.) ) )
+
+        case(NASH_SUTCLIFFE)
+
+          this%tTableData(j)%sDescription = "Nash-Sutcliffe coefficient: "
+          if(rSum1 > rNEAR_ZERO .or. rSum1 < -rNEAR_ZERO) then
+            this%tTableData(j)%sValue(1) = asChar( 1.0 - ( rSum2 / rSum5 ) )
+          else
+            this%tTableData(j)%sValue(1) = asChar( -HUGE(rExponent) )
+          endif
+
+        case(COEFFICIENT_OF_EFFICIENCY)
+
+          this%tTableData(j)%sDescription = "Coefficient of efficiency: "
+          if(rSum6 > rNEAR_ZERO .or. rSum6 < -rNEAR_ZERO) then
+            this%tTableData(j)%sValue(1) = asChar( 1.0 - ( rSum4 / rSum6 ) )
+          else
+            this%tTableData(j)%sValue(1) = asChar( -HUGE(rExponent) )
+          endif
+
+        case(INDEX_OF_AGREEMENT)
+
+          this%tTableData(j)%sDescription = "Index of agreement: "
+          if(rSum7 > rNEAR_ZERO .or. rSum7 < -rNEAR_ZERO) then
+            this%tTableData(j)%sValue(1) = asChar( 1.0 - ( rSum4 / rSum7 ) )
+          else
+            this%tTableData(j)%sValue(1) = asChar( -HUGE(rExponent) )
+          endif
+
+        case default
+
+          call assert(lFALSE, "Internal programming error - unhandled select case event", &
+            trim(__FILE__), __LINE__)
+
+      end select
+
+
+    enddo
+
+
+  end subroutine table_calc_c_table
 
 !------------------------------------------------------------------------------
 
@@ -828,7 +1027,7 @@ contains
 
     else  ! no pBlock argument present; assume default values and make the table
 
-      sNewVTableName = pTS%sSeriesName//"_VTBL"
+      sNewVTableName = trim(pTS%sSeriesName)//"_VTBL"
 
     endif
 
@@ -899,6 +1098,12 @@ end subroutine table_calc_v_table
             trim(this%tTableData(i)%sValue(1))
       enddo
 
+    elseif( this%iTableType == iCTABLE ) then
+      do i=1,size(this%tTableData)
+         write(LU,fmt="(t4,a48,t55,a)") trim(adjustl(this%tTableData(i)%sDescription)), &
+            trim(this%tTableData(i)%sValue(1))
+      enddo
+
     elseif( this%iTableType == iETABLE ) then
       write(LU,fmt= "(a)") trim(this%sHeader)
       do i=1,size(this%tTableData)
@@ -952,6 +1157,17 @@ end subroutine table_calc_v_table
       write(LU,fmt="(a)") "l8"
       j = 0
       do i=9,size(this%tTableData)
+        j = j + 1
+        write(LU,fmt="(a)") "l1 ["//trim(this%sSeriesName)//"_"//trim(asChar(j) )//"]" &
+          //trim(asChar(iInitialCharacter) )//":"//trim(asChar(iInitialCharacter + 20) )
+      enddo
+
+    elseif( this%iTableType == iCTABLE ) then
+      iInitialCharacter = 53
+      write(LU,fmt="('$S_TABLE$')" )
+      write(LU,fmt="(a)") "l8"
+      j = 0
+      do i=7,size(this%tTableData)
         j = j + 1
         write(LU,fmt="(a)") "l1 ["//trim(this%sSeriesName)//"_"//trim(asChar(j) )//"]" &
           //trim(asChar(iInitialCharacter) )//":"//trim(asChar(iInitialCharacter + 20) )

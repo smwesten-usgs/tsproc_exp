@@ -15,7 +15,7 @@ module tsp_time_series_manager
   type T_TIME_SERIES_DATA
     integer (kind=T_INT) :: iWaterYear     = 0
     type (T_DATETIME) :: tDT
-    real (kind=T_SGL)    :: rValue         = 0.0
+    real (kind=T_SGL)    :: rValue         = -HUGE(rZERO)
     character (len=10)   :: sDataFlag      = ""
     logical (kind=T_LOGICAL) :: lSelect = lFALSE
 
@@ -34,6 +34,8 @@ module tsp_time_series_manager
     character (len=DATETEXTLENGTH) :: sDateFormat
     type (T_DATETIME) :: tStartDate
     type (T_DATETIME) :: tEndDate
+    type (T_DATETIME) :: tSelectionStartDate
+    type (T_DATETIME) :: tSelectionEndDate
     integer (kind=T_INT) :: iDataType = iDAILY_DATA
     integer (kind=T_INT) :: iListOutputPosition = -999
     type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
@@ -358,19 +360,34 @@ contains
     ! [ LOCALS ]
     type (T_DATETIME) :: tMINDATE
     type (T_DATETIME) :: tMAXDATE
+    type (T_DATETIME) :: tMINDATE_selection
+    type (T_DATETIME) :: tMAXDATE_selection
     integer (kind=T_INT) :: i
 
     call tMINDATE%calcJulianDay( 1, 1, 3000, 0, 0, 0)
     call tMAXDATE%calcJulianDay( 1, 1, 1, 0, 0, 0)
+    tMINDATE_selection = tMINDATE
+    tMAXDATE_selection = tMAXDATE
 
     do i=1,size(this%tData)
-      if(this%tData(i)%tDT < tMINDATE) tMINDATE = this%tData(i)%tDT
-      if(this%tData(i)%tDT > tMAXDATE) tMAXDATE = this%tData(i)%tDT
-!      print *, this%tData(i)%tDT%prettyDate(), " ",tMINDATE%prettyDate()," ", tMAXDATE%prettyDate()
+      ! determine min and max date for selected values only
+      if(this%tData(i)%tDT < tMINDATE_selection .and. this%tData(i)%lSelect) &
+          tMINDATE_selection = this%tData(i)%tDT
+      if(this%tData(i)%tDT > tMAXDATE_selection .and. this%tData(i)%lSelect) &
+          tMAXDATE_selection = this%tData(i)%tDT
+
+      ! determine the min and max date for entire series
+      if(this%tData(i)%tDT < tMINDATE) &
+          tMINDATE = this%tData(i)%tDT
+      if(this%tData(i)%tDT > tMAXDATE) &
+          tMAXDATE = this%tData(i)%tDT
     enddo
 
     this%tStartDate = tMINDATE
     this%tEndDate = tMAXDATE
+
+    this%tSelectionStartDate = tMINDATE_selection
+    this%tSelectionEndDate = tMAXDATE_selection
 
   end subroutine find_min_and_max_date_sub
 
@@ -818,8 +835,8 @@ contains
         rWINDOW = pWINDOW(1)
 
         pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
-        call assert(str_compare(pNEW_SERIES_NAME(1),"NA"), &
-          "No value was supplied for NEW_SERIES_NAME in block starting at line" &
+        call assert(.not. str_compare(pNEW_SERIES_NAME(1),"NA"), &
+          "No value was supplied for NEW_SERIES_NAME in block starting at line " &
             //trim(asChar(pBlock%iStartingLineNumber) ), &
             trim(__FILE__), __LINE__)
         sNewSeriesName = trim(pNEW_SERIES_NAME(1) )
