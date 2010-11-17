@@ -75,7 +75,7 @@ subroutine get_mul_series_usgs_nwis(pBlock, TS)
   pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
   pSITE => pBlock%getString("SITE")
 
-  open(newunit=LU_DATA,file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
+  open(unit=newunit(LU_DATA),file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
   call Assert(iStat==0,'Error opening NWIS file '//TRIM(pFILE(1)))
 
   ! make first pass through the NWIS file to determine what it contains
@@ -276,7 +276,8 @@ subroutine get_mul_series_usgs_nwis(pBlock, TS)
       enddo
       call pTS(i)%findDateMinAndMax()
       pTempSeries => pTS(i)
-      call TS%add(pTempSeries)
+!      call TS%addSeries(pTempSeries)
+      call TS%insert(pNewSeries=pTempSeries)
     endif
 
   end do
@@ -343,7 +344,7 @@ subroutine get_mul_series_ssf(pBlock, TS)
   pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
 
   close(LU_DATA)
-  open(newunit=LU_DATA,file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
+  open(unit=newunit(LU_DATA),file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
   call Assert(iStat==0,'Error opening file or missing file: '//TRIM(pFILE(1)), &
     TRIM(__FILE__), __LINE__)
 
@@ -373,8 +374,14 @@ subroutine get_mul_series_ssf(pBlock, TS)
     call tCurrDate%parseTime(sTimeTxt)
     call tCurrDate%calcJulianDay()
 
+    call writelog(quote(sSiteID)//" | "// tCurrDate%listdate())
+
     if(tCurrDate < tDATETIME_1) cycle
     if(tCurrDate > tDATETIME_2) cycle
+
+    if(str_compare(sSiteID,"04060500") ) then
+      call writelog(" ** ")
+    endif
 
     call Chomp(sRecord,sItem, DELIMITERS)  ! discharge and data flag
 
@@ -383,6 +390,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
   end do
 
   iTotalNumSites = iSiteNum
+
+  call echolog("Number of data lines in SSF file: "//trim(asChar(SUM(iTotalNumLines))) )
 
   ! check to see if the SITEs given by user are actually found in the SSF file
   if(.not. str_compare(pSITE(1),"NA")) then
@@ -425,6 +434,13 @@ subroutine get_mul_series_ssf(pBlock, TS)
     endif
   end do
 
+  !
+  !
+  ! TODO: change code so that the sitename absolutely corresponds to the proper
+  !       user-specified site number and new series name
+  !
+  !
+
   iLineNum = 0
   iSiteNum = 0
   sOldSiteID = ""
@@ -453,7 +469,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
       iSiteNum = iSiteNum + 1
       iLineNum = 0
 !      pGage(iSiteNum)%sSiteNumber = sSiteID
-      pTS(iSiteNum)%sSeriesName = sSiteID
+!      pTS(iSiteNum)%sSeriesName = sSiteID
+       pTS(iSiteNum)%sSeriesName = sSiteID
     endif
 
     ! obtain a value for the DATE field
@@ -500,7 +517,8 @@ subroutine get_mul_series_ssf(pBlock, TS)
 !      call tTS(i)%new(pGage(i),sNewSeriesName)    ! a time series object
       pTempSeries => pTS(i)
       call pTempSeries%findDateMinAndMax()
-      call TS%add(pTempSeries)
+!      call TS%addSeries(pTempSeries)
+      call TS%insert(pNewSeries=pTempSeries)
 !      call echolog(" ==> Added series "//quote(pTS(i)%sSeriesname)//" from site " &
 !         //trim(pSITE(i))//"; "//trim(asChar(size(pTS(i)%tData)))//" data elements")
 
@@ -519,6 +537,178 @@ end subroutine get_mul_series_ssf
 
 !------------------------------------------------------------------------------
 
+subroutine get_mul_series_ssf_fast(pBlock, TS)
+
+  implicit none
+
+  type (T_BLOCK), pointer :: pBlock
+  type (TIME_SERIES_COLLECTION), intent(inout) :: TS
+
+  ! [ LOCALS ]
+  type (T_TIME_SERIES), pointer :: pTS
+
+  integer (kind=T_INT) :: iMM, iDD, iYYYY
+  integer (kind=T_INT) :: iStat
+  integer (kind=T_INT) :: iLineNum = 0
+  character (len=MAXNAMELENGTH) :: sOldSiteID
+  character (len=MAXNAMELENGTH) :: sSiteID
+  character (len=MAXARGLENGTH) :: sFilename
+
+  real (kind=T_SGL) :: rValue
+
+  integer (kind=T_INT) :: iMonth, iDay, iYear, iJulianDay, iWaterYear
+
+  integer (kind=T_INT) :: iCount
+  integer (kind=T_INT) :: i, j
+  logical (kind=T_LOGICAL) :: lMatch
+  logical (kind=T_LOGICAL) :: lSkipThisSite
+  logical (kind=T_LOGICAL) :: lFirstTimeThrough
+
+  type (T_TIME_SERIES), pointer :: pTempSeries
+  integer (kind=T_INT) :: iSiteNum
+  integer (kind=T_INT) :: iTotalNumSites
+
+  character (len=2), parameter :: DELIMITERS = ACHAR(9)//" "
+
+  type (T_DATETIME) :: tDATETIME_1, tDATETIME_2, tCurrDate
+
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pFILE
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pSITE
+  character (len=MAXARGLENGTH), dimension(:), pointer :: pNEW_SERIES_NAME
+
+  character (len=256) sRecord, sItem
+  character (len=256) sDateTxt, sTimeTxt
+
+  iCount = 0; i=0 ; iSiteNum = 0
+  sOldSiteID = ""; sSiteID = ""
+  lFirstTimeThrough = lTRUE
+
+  call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
+
+  ! obtain user-entered values from TSPROC block
+  pFILE => pBlock%getString("FILE")
+  pSITE => pBlock%getString("SITE")
+  pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+
+  close(LU_DATA)
+  open(unit=newunit(LU_DATA),file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
+  call Assert(iStat==0,'Error opening file or missing file: '//TRIM(pFILE(1)), &
+    TRIM(__FILE__), __LINE__)
+
+  call echolog('Opened SSF file: '//TRIM(pFILE(1)))
+
+  lSkipThisSite = lFALSE
+
+  ! begin reading SSF file
+  do
+    read(unit=LU_DATA, fmt="(a)",iostat=iStat) sRecord
+    if(iStat /= 0) then
+      if( .not. lSkipThisSite ) then
+        call pTS%resizeTemp()
+        call pTS%findDateMinAndMax()
+!        call TS%addSeries(pTS)
+        call TS%insert(pNewSeries=pTS)
+        nullify(pTS)
+        allocate(pTS, stat=iStat)
+        call assert(iStat==0, "Memory allocation error", &
+          trim(__FILE__),__LINE__)
+        call pTS%newTemp()
+      endif
+      exit
+    elseif(sRecord(1:1) .eq. "#") then
+      cycle
+    end if
+
+    call Chomp(sRecord,sItem, DELIMITERS)  ! site id
+    sSiteID = trim(sItem)
+
+    ! are we reading a record from a new site?
+    if(.not. str_compare(sSiteID, sOldSiteID)) then
+      sOldSiteID = sSiteID
+      iSiteNum = iSiteNum + 1
+      ! if this is not the first time we detect a change between the old site id
+      ! and the current site id, then assume we have a time series to add
+      if( (.not. lFirstTimeThrough) .and. (.not. lSkipThisSite)) then
+        call pTS%resizeTemp()
+        call pTS%findDateMinAndMax()
+!        call TS%addSeries(pTS)
+        call TS%insert(pNewSeries=pTS)
+        nullify(pTS)
+        allocate(pTS, stat=iStat)
+        call assert(iStat==0, "Memory allocation error", &
+          trim(__FILE__),__LINE__)
+        call pTS%newTemp()
+      else
+        lFirstTimeThrough = lFALSE
+        allocate(pTS, stat=iStat)
+        call assert(iStat==0, "Memory allocation error", &
+          trim(__FILE__),__LINE__)
+        call pTS%newTemp()
+      endif
+
+      ! has the user specified a list of site ids? If so, is this site on the list?
+      if(.not. str_compare(pSITE(1),"NA")) then
+        lMatch = lFALSE
+        do j=1,size(pSITE)
+          if(str_compare(pSITE(j),sSiteID)) then
+            lMatch = lTRUE
+            pTS%sDescription = "Series "//quote(pNEW_SERIES_NAME(j))//" from SSF file " &
+             //quote(pFILE(1))//", site "//trim(pSITE(j))
+            pTS%sSeriesName = pNEW_SERIES_NAME(j)
+            exit
+          endif
+        enddo
+
+        ! did we find a matching site id in the users list of requested sites?
+        if(lMatch) then
+          lSkipThisSite = lFALSE
+        else
+          lSkipThisSite = lTRUE
+        endif
+      else  ! user has not specified a list of sites; assume that all sites are requested
+        lSkipThisSite = lFALSE
+        pTS%sDescription = "Series "//quote(pSITE(j))//" from SSF file " &
+           //quote(pFILE(1))//", site "//trim(pSITE(j))
+        pTS%sSeriesName = pSITE(j)
+      endif
+
+    endif
+
+    if(lSkipThisSite) cycle
+
+    call Chomp(sRecord,sDateTxt, DELIMITERS)  ! date
+    call Chomp(sRecord,sTimeTxt, DELIMITERS)  ! time
+
+    call tCurrDate%parseDate(sDateTxt)
+    call tCurrDate%parseTime(sTimeTxt)
+    call tCurrDate%calcJulianDay()
+
+    if(tCurrDate < tDATETIME_1) cycle
+    if(tCurrDate > tDATETIME_2) cycle
+
+    call Chomp(sRecord,sItem, DELIMITERS)  ! discharge and data flag
+
+    if(len_trim(sItem)>0) then
+      read(sItem,fmt=*) rValue
+      call Chomp(sRecord, sItem, DELIMITERS)
+      call pTS%addTemp(rValue, tCurrDate, trim(sItem))
+    else
+      cycle
+    end if
+
+  end do
+
+  close(unit=LU_DATA)
+
+  nullify(pTS)
+  if(associated(pFILE) ) deallocate(pFILE)
+  if(associated(pSITE) ) deallocate(pSITE)
+  if(associated(pNEW_SERIES_NAME) ) deallocate(pNEW_SERIES_NAME)
+
+end subroutine get_mul_series_ssf_fast
+
+!------------------------------------------------------------------------------
+
 subroutine get_mul_series_statvar(pBlock, TS)
 
   implicit none
@@ -527,7 +717,7 @@ subroutine get_mul_series_statvar(pBlock, TS)
   type (TIME_SERIES_COLLECTION), intent(inout) :: TS
 
   ! [ LOCALS ]
-  integer (kind=T_INT) :: iStat
+  integer (kind=T_INT) :: iStat, iStat2
   integer (kind=T_INT) :: iTotalNumLines
   integer (kind=T_INT) :: iLineNum
   character (len=MAXARGLENGTH) :: sFilename
@@ -557,10 +747,12 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   character (len=256) sRecord, sItem
   character (len=256) sDateTxt, sTimeTxt
-  character (len=256) sNewSeriesName
+  character (len=4096) :: sBuf
   character (len=32) :: sDateFormat
 
   iCount = 0; i=0
+
+  ! process any user-supplied date keywords
   call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
 
   ! obtain user-entered values from TSPROC block
@@ -580,7 +772,7 @@ subroutine get_mul_series_statvar(pBlock, TS)
     sDateFormat = trim(pDATE_FORMAT(1))
   endif
 
-  open(newunit=LU_DATA,file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
+  open(unit=newunit(LU_DATA),file=TRIM(ADJUSTL(pFILE(1))),status='OLD',iostat=iStat)
   call Assert(iStat==0,'Error opening file or missing file: '//TRIM(pFILE(1)), &
     TRIM(__FILE__), __LINE__)
 
@@ -591,10 +783,10 @@ subroutine get_mul_series_statvar(pBlock, TS)
   call Assert( iStat == 0, "Problem reading the number of variables contained in " &
     //"statvar file "//quote(pFILE(1) ), trim(__FILE__), __LINE__)
 
+
   allocate(sPRMSVariable(iNumVariables), stat=iStat)
   call Assert(iStat ==0, "Problem allocating memory to store PRMS variable names", &
     trim(__FILE__),__LINE__)
-
 
   allocate(rStatvarValues(iNumVariables), stat=iStat)
   call Assert(iStat ==0, "Problem allocating memory to store PRMS variable values", &
@@ -610,9 +802,12 @@ subroutine get_mul_series_statvar(pBlock, TS)
   ! count number of entries within the window defined by DATETIME_1 and DATETIME_2
   iTotalNumLines = 0
   do
-    read(unit=LU_DATA, fmt=*,iostat=iStat) iRecNum, iYear, iMonth, iDay, &
+
+    read(unit=LU_DATA, fmt="(a)",iostat=iStat) sBuf
+    read(unit=sBuf, fmt=*,iostat=iStat2) iRecNum, iYear, iMonth, iDay, &
          iHour, iMinute, iSecond
-    if(iStat /= 0) then
+
+    if(iStat /= 0 .or. iStat2 /= 0) then
       exit
     end if
 
@@ -620,7 +815,6 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
     if(tCurrDate < tDATETIME_1) cycle
     if(tCurrDate > tDATETIME_2) cycle
-
     iTotalNumLines = iTotalNumLines + 1
 
   end do
@@ -675,7 +869,7 @@ subroutine get_mul_series_statvar(pBlock, TS)
       TRIM(__FILE__),__LINE__)
   enddo
 
-  ! now make second pass through the statvar file, commiting values to memory
+  ! now make second pass through the statvar file, comitting values to memory
   ! first, plough through the header and variable definitions
   do i=1,iNumVariables + 1
     read(unit=LU_DATA, fmt="(a)",iostat=iStat) sRecord
@@ -683,11 +877,13 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   iLineNum = 0
   do
-    read(unit=LU_DATA, fmt=*,iostat=iStat) iRecNum, iYear, iMonth, iDay, &
+    read(unit=LU_DATA, fmt="(a)",iostat=iStat) sBuf
+    read(unit=sBuf, fmt=*,iostat=iStat2) iRecNum, iYear, iMonth, iDay, &
          iHour, iMinute, iSecond, (rStatvarValues(j), j=1,iNumVariables)
-    if(iStat /= 0) then
-      exit
-    end if
+
+    if(iStat /= 0) exit
+    if(iStat2 /= 0) call Assert(lFALSE, &
+      "Problem reading MM/DD/YYYY HH:MM:SS from SSF file; line = "//quote(sBuf) )
 
     call tCurrDate%calcJulianDay(iMonth, iDay, iYear, iHour, iMinute, iSecond)
 
@@ -699,6 +895,15 @@ subroutine get_mul_series_statvar(pBlock, TS)
     do j=1,iNumOutputVariables
 !      call assert(j<=ubound(pTS,1), "upper bound of pTS exceeded: "//trim(asChar(j)), &
 !        trim(__FILE__),__LINE__)
+!      call assert(iLineNum<=ubound(pTS(j)%tData,1), "upper bound of pTS%tData exceeded: " &
+!        //trim(asChar(j)), trim(__FILE__),__LINE__)
+!      call assert(iLineNum>=lbound(pTS(j)%tData,1), "lower bound of pTS%tData exceeded: " &
+!        //trim(asChar(j)), trim(__FILE__),__LINE__)
+!      call assert(iVariableNameIndex(j)>=lbound(rStatvarValues,1), "lower bound of rStatvarValues exceeded: " &
+!        //trim(asChar(iVariableNameIndex(j))), trim(__FILE__),__LINE__)
+!      call assert(iVariableNameIndex(j)<=ubound(rStatvarValues,1), "upper bound of rStatvarValues exceeded: " &
+!        //trim(asChar(iVariableNameIndex(j))), trim(__FILE__),__LINE__)
+
       pTS(j)%tData(iLineNum)%rValue = rStatvarValues(iVariableNameIndex(j) )
       pTS(j)%tData(iLineNum)%tDT = tCurrDate
       call pTS(j)%tData(iLineNum)%tDT%calcWaterYear()
@@ -706,15 +911,18 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   end do
 
+  nullify(pTempSeries)
   do i=1,size(pTS)
     if(size(pTS(i)%tData) > 0) then    ! if there are no records, no point in adding
-      pTS(i)%sDescription = "Series "//quote(sNewSeriesName)//" from statvar file " &
+      pTS(i)%sDescription = "Series "//quote(pNEW_SERIES_NAME(i))//" from statvar file " &
          //quote(pFILE(1))
       pTS(i)%sSeriesName = pNEW_SERIES_NAME(i)
 
       pTempSeries => pTS(i)
       call pTempSeries%findDateMinAndMax()
-      call TS%add(pTempSeries)
+!      call TS%addSeries(pTempSeries)
+      call TS%insert(pNewSeries=pTempSeries)
+      nullify(pTempSeries)
 !     call echolog(" ==> Added series "//quote(pTS(i)%sSeriesname))
     endif
 
@@ -722,8 +930,11 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   close(unit=LU_DATA)
 
-  deallocate(pFILE); deallocate(pVARIABLE_NAME); deallocate(pNEW_SERIES_NAME)
-  deallocate(pDATE_FORMAT); deallocate(pLOCATION_ID)
+  if(associated(pFILE) )  deallocate(pFILE)
+  if(associated(pVARIABLE_NAME) )  deallocate(pVARIABLE_NAME)
+  if(associated(pNEW_SERIES_NAME) )  deallocate(pNEW_SERIES_NAME)
+  if(associated(pLOCATION_ID) )  deallocate(pLOCATION_ID)
+  if(associated(pDATE_FORMAT) )  deallocate(pDATE_FORMAT)
 
 end subroutine get_mul_series_statvar
 
@@ -851,10 +1062,11 @@ subroutine get_series_wdm(pBlock, TS)
 
   ! for now, only allow one TS per block to be added
 
-  call pTS%new(sNewSeriesName, "Series from WDM file", &
+  call pTS%newFmDT(sNewSeriesName, "Series from WDM file", &
      pack(tDate, lSelect), pack(rValue, lSelect) )
 
-  call TS%add(pTS)
+!  call TS%addSeries(pTS)
+  call TS%insert(pNewSeries=pTS)
 
 
   end subroutine get_series_wdm

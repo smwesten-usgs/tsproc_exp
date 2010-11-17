@@ -79,7 +79,9 @@ contains
   iNumVariables = size(sVariableNames)
 
   !detects errors
-  call lowercase(sFunctionText)
+
+  sFunctionText = lowercase(sFunctionText)
+!  call lowercase(sFunctionText)
   call convert_brackets(sFunctionText)
   call remove_blanks(sFunctionText)
   call basic_error_check(sFunctionText)
@@ -945,7 +947,8 @@ contains
      return
    end if
 
-   call lowercase(sFunction)
+   sFunction = lowercase(sFunction)
+!   call lowercase(sFunction)
 
    if(sFunction(iNumChar:iNumChar) == '-' .or. sFunction(iNumChar:iNumChar) == '+' &
        .or. sFunction(iNumChar:iNumChar) == '/' .or. sFunction(iNumChar:iNumChar) == '*') then

@@ -19,6 +19,10 @@ module tsp_utilities
     module procedure dbl2char_wsf
   end interface asChar
 
+  interface isKeyInList
+    module procedure is_key_in_sorted_array_fn
+  end interface isKeyInList
+
   interface asReal
     module procedure char2dbl
   end interface asReal
@@ -28,12 +32,12 @@ module tsp_utilities
   end interface asInt
 
   interface uppercase
-    module procedure uppercase_sub
+!    module procedure uppercase_sub
     module procedure uppercase_fn
   end interface
 
   interface lowercase
-    module procedure lowercase_sub
+!    module procedure lowercase_sub
     module procedure lowercase_fn
   end interface
 
@@ -43,7 +47,75 @@ module tsp_utilities
     module procedure equals_dbl
   end interface
 
+  interface chomp
+    module procedure chomp_delim_sub
+    module procedure chomp_default_sub
+  end interface
+
 contains
+
+
+
+!------------------------------------------------------------------------------
+
+! This is a simple function to search for an available unit.
+! LUN_MIN and LUN_MAX define the range of possible LUNs to check.
+! The UNIT value is returned by the function, and also by the optional
+! argument. This allows the function to be used directly in an OPEN
+! statement, and optionally save the result in a local variable.
+! If no units are available, -1 is returned.
+integer function newunit(unit)
+  integer, intent(out), optional :: unit
+! local
+  integer, parameter :: LUN_MIN=10, LUN_MAX=1000
+  logical :: opened
+  integer :: lun
+! begin
+  newunit=-1
+  do lun=LUN_MIN,LUN_MAX
+    inquire(unit=lun,opened=opened)
+    if (.not. opened) then
+      newunit=lun
+      exit
+    end if
+  end do
+  if (present(unit)) unit=newunit
+end function newunit
+
+!------------------------------------------------------------------------------
+
+function is_key_in_sorted_array_fn(sList, sKey)  result(lFound)
+
+  character (len=*), dimension(:) :: sList
+  character (len=*) :: sKey
+  logical (kind=T_LOGICAL) :: lFound
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iLeft, iRight, iMiddle, iCount, iIter
+
+  iCount = size(sList)
+  lFound = lFALSE
+  iLeft = lbound(sList,1)
+  iRight = iCount
+  if(iCount < iLeft) return  ! array is empty
+
+  iIter = 0
+  do
+    iMiddle = (iLeft + iRight) / 2
+    iIter = iIter + 1
+    if(LLT(sKey, sList(iMiddle)) ) then
+      if(iLeft >= iRight) exit        ! element not found in array
+      iRight = iMiddle
+    elseif(LGT(sKey,sList(iMiddle)) ) then
+      if(iLeft >= iRight) exit        ! element not found in array
+      iLeft = iMiddle + 1
+    else
+      lFound = lTRUE
+      exit
+    endif
+  enddo
+
+end function is_key_in_sorted_array_fn
 
 !------------------------------------------------------------------------------
 
@@ -90,7 +162,7 @@ end function quote
 
 !------------------------------------------------------------------------------
 
-elemental function str_compare_elem(sString1, sString2)              result(lBool)
+function str_compare_elem(sString1, sString2)              result(lBool)
 
   character(len=*), intent(in) :: sString1
   character(len=*), intent(in) :: sString2
@@ -413,18 +485,21 @@ end function dbl2char_wsf
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: iStat
-    character(len=256) :: sDateStr, sDateStrPretty
+    character(len=17) :: sDateStr, sDateStrPretty
+    character(len=256) :: sFilenameText
 
     if(present(sFilename)) then
-      open(newunit=LU_REC, file=trim(sFilename),status='REPLACE',iostat=iStat)
+      sFilenameText = trim(sFilename)
+      open(unit=newunit(LU_REC), file=trim(sFilename),status='REPLACE',iostat=iStat)
     else
       call GetSysTimeDate(sDateStr,sDateStrPretty)
-      open(newunit=LU_REC, file="tsproc_logfile_"//trim(sDateStr)//".txt", &
+      sFilenameText = trim("tsproc_logfile_"//trim(adjustl(sDateStr))//".txt")
+      open(unit=newunit(LU_REC), file=sFilenameText, &
             status='REPLACE',iostat=iStat)
     end if
 
     call Assert(iStat==0, "Problem opening TSPROC logfile " &
-      //quote("tsproc_logfile_"//trim(sDateStr)//".txt"), trim(__FILE__), __LINE__)
+      //quote(sFilenameText), trim(__FILE__), __LINE__)
 
   end subroutine openlog
 
@@ -513,7 +588,7 @@ end subroutine uppercase_sub
 
 !--------------------------------------------------------------------------
 
-elemental function uppercase_fn ( s )                               result(sOut)
+function uppercase_fn ( s )                               result(sOut)
 
   ! ARGUMENTS
   character (len=*), intent(in) :: s
@@ -521,9 +596,9 @@ elemental function uppercase_fn ( s )                               result(sOut)
   ! LOCALS
   integer (kind=T_INT) :: i    ! do loop index
   ! CONSTANTS
-  integer (kind=T_INT) :: LOWER_TO_UPPER
+  integer (kind=T_INT), parameter :: LOWER_TO_UPPER = -32
 
-  LOWER_TO_UPPER = ichar( "A" ) - ichar( "a" )
+!  LOWER_TO_UPPER = ichar( "A" ) - ichar( "a" )
 
   sOut = s
 
@@ -538,7 +613,7 @@ end function uppercase_fn
 
 !--------------------------------------------------------------------------
 
-elemental function lowercase_fn ( s )                               result(sOut)
+function lowercase_fn ( s )                               result(sOut)
 
   ! ARGUMENTS
   character (len=*), intent(in) :: s
@@ -546,9 +621,9 @@ elemental function lowercase_fn ( s )                               result(sOut)
   ! LOCALS
   integer (kind=T_INT) :: i    ! do loop index
   ! CONSTANTS
-  integer (kind=T_INT) :: UPPER_TO_LOWER
+  integer (kind=T_INT), parameter :: UPPER_TO_LOWER = 32
 
-  UPPER_TO_LOWER = ichar( "a" ) - ichar( "A" )
+!  UPPER_TO_LOWER = ichar( "a" ) - ichar( "A" )
 
   sOut = s
 
@@ -728,35 +803,38 @@ end function clean
 
 subroutine GetSysTimeDate(sDateStr,sDateStrPretty)
 
-  character(len=256), intent(out) :: sDateStr, sDateStrPretty
+  character(len=17), intent(out) :: sDateStr, sDateStrPretty
 
-  character (len=256) :: sRecord
-  character (len=256) :: sItem
-  character (len=256) :: sDay
-  character (len=256) :: sMon
-  character (len=256) :: sDD
-  character (len=8) :: sHH
-  character (len=8) :: sMM
-  character (len=8) :: sSS
-  character (len=256) :: sTime
-  character (len=256) :: sYear
+  character (len=8) :: sDate
+  character (len=10) :: sTime
+  character (len=2) :: sDay
+  character (len=2) :: sMon
+  character (len=4) :: sYear
+  character (len=2) :: sHH
+  character (len=2) :: sMM
+  character (len=2) :: sSS
 
-  sRecord = FDATE()
+!  sRecord = FDATE()
+  call DATE_AND_TIME(sDate, sTime)
 
-  call chomp(sRecord,sDay)
-  call chomp(sRecord,sMon)
-  call chomp(sRecord,sDD)
-  call chomp(sRecord,sTime)
-  call chomp(sRecord,sYear)
+  print *, quote(sDate)," ",quote(sTime)
 
+!  call chomp(sRecord,sDay)
+!  call chomp(sRecord,sMon)
+!  call chomp(sRecord,sDD)
+!  call chomp(sRecord,sTime)
+!  call chomp(sRecord,sYear)
+  sDay = sDate(7:8)
+  sMon = sDate(5:6)
+  sYear = sDate(1:4)
   sHH = sTime(1:2)
   sMM = sTime(4:5)
   sSS = sTime(7:8)
 
-  sDateStr = TRIM(sDD)//"_"//TRIM(sMon)//"_"//TRIM(sYear)//"__"//&
+  sDateStr = TRIM(sYear)//"_"//TRIM(sMon)//"_"//TRIM(sDay)//"__"//&
     TRIM(sHH)//"_"//TRIM(sMM)
   sDateStrPretty = &
-    TRIM(sDay)//" "//TRIM(sMon)//" "//TRIM(sDD)//" "//TRIM(sYear)//" " &
+    TRIM(sDay)//" "//TRIM(sMon)//" "//TRIM(sYear)//" " &
      //TRIM(sHH)//":"//TRIM(sMM)
 
   return
@@ -852,12 +930,12 @@ end function pluck
 
 !------------------------------------------------------------------------------
 
-subroutine Chomp(sRecord, sItem, sDelimiters)
+subroutine Chomp_delim_sub(sRecord, sItem, sDelimiters)
 
   ! ARGUMENTS
   character (len=*), intent(inout)           :: sRecord
   character (len=256), intent(out)           :: sItem
-  character (len=*), intent(in), optional    :: sDelimiters
+  character (len=*), intent(in)              :: sDelimiters
   ! LOCALS
   integer (kind=T_INT) :: iR                      ! Index in sRecord
   integer (kind=T_INT) :: iB                      !
@@ -868,15 +946,10 @@ subroutine Chomp(sRecord, sItem, sDelimiters)
   ! find the end position of 'sRecord'
   iLen = len_trim(sRecord)
 
-  if(present(sDelimiters)) then
-    ! find first occurrance of delimiter
-    iR = SCAN(trim(sRecord),sDelimiters)
-    ! find *next* occurance of *NON*-delimiter (needed to skip over multiple delimiters)
-    iB = verify(string = sRecord(max(iR,1):iLen), set = sDelimiters)
-  else
-    iR = SCAN(trim(sRecord)," ")
-    iB = verify(string = sRecord(max(iR,1):iLen), set = " ")
-  endif
+  ! find first occurrance of delimiter
+  iR = SCAN(trim(sRecord),sDelimiters)
+  ! find *next* occurance of *NON*-delimiter (needed to skip over multiple delimiters)
+  iB = verify(string = sRecord(max(iR,1):iLen), set = sDelimiters)
 
   if(iR==0) then
     sItem = trim(sRecord)   ! no delimiters found; return entirety of sRecord
@@ -886,7 +959,38 @@ subroutine Chomp(sRecord, sItem, sDelimiters)
     sRecord = trim(sRecord(iR+iB-1:))
   end if
 
-end subroutine Chomp
+end subroutine Chomp_delim_sub
+
+!------------------------------------------------------------------------------
+
+subroutine Chomp_default_sub(sRecord, sItem)
+
+  ! ARGUMENTS
+  character (len=*), intent(inout)           :: sRecord
+  character (len=256), intent(out)           :: sItem
+
+  ! LOCALS
+  integer (kind=T_INT) :: iR                      ! Index in sRecord
+  integer (kind=T_INT) :: iB                      !
+  integer (kind=T_INT) :: iLen
+
+  ! eliminate any leading spaces
+  sRecord = adjustl(sRecord)
+  ! find the end position of 'sRecord'
+  iLen = len_trim(sRecord)
+
+  iR = SCAN(trim(sRecord)," ")
+  iB = verify(string = sRecord(max(iR,1):iLen), set = " ")
+
+  if(iR==0) then
+    sItem = trim(sRecord)   ! no delimiters found; return entirety of sRecord
+    sRecord = ""            ! as sItem
+  else
+    sItem = trim(sRecord(1:iR-1))
+    sRecord = trim(sRecord(iR+iB-1:))
+  end if
+
+end subroutine Chomp_default_sub
 
 !------------------------------------------------------------------------------
 

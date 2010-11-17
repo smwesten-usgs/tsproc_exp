@@ -12,7 +12,7 @@ module tsp_time_series_manager
   integer (kind=T_INT), parameter :: iMONTHLY_DATA = 2
   integer (kind=T_INT), parameter :: iANNUAL_DATA = 3
 
-  type T_TIME_SERIES_DATA
+  type :: T_TIME_SERIES_DATA
     integer (kind=T_INT) :: iWaterYear     = 0
     type (T_DATETIME) :: tDT
     real (kind=T_SGL)    :: rValue         = -HUGE(rZERO)
@@ -25,7 +25,7 @@ module tsp_time_series_manager
 
   end type T_TIME_SERIES_DATA
 
-  type T_TIME_SERIES
+  type :: T_TIME_SERIES
     type (T_TIME_SERIES), pointer :: pNext => null()
     type (T_TIME_SERIES), pointer :: pPrevious => null()
     character (len=MAXNAMELENGTH) :: sSiteName = ""
@@ -37,6 +37,7 @@ module tsp_time_series_manager
     type (T_DATETIME) :: tSelectionStartDate
     type (T_DATETIME) :: tSelectionEndDate
     integer (kind=T_INT) :: iDataType = iDAILY_DATA
+    integer (kind=T_INT) :: iCurrentRecord = 0
     integer (kind=T_INT) :: iListOutputPosition = -999
     type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
 
@@ -54,10 +55,20 @@ module tsp_time_series_manager
     procedure :: new_time_series_fm_NWIS_sub
     procedure :: new_time_series_fm_values_sub
     procedure :: new_time_series_fm_DT_sub
-    generic :: new => new_time_series_fm_txt_sub, &
-                                new_time_series_fm_NWIS_sub, &
-                                new_time_series_fm_values_sub, &
-                                new_time_series_fm_DT_sub
+!    generic :: new => new_time_series_fm_txt_sub, &
+!                                new_time_series_fm_NWIS_sub, &
+!                                new_time_series_fm_values_sub, &
+!                                new_time_series_fm_DT_sub
+
+    procedure :: newFmText => new_time_series_fm_txt_sub
+    procedure :: newFmNWIS => new_time_series_fm_NWIS_sub
+    procedure :: newFmValues => new_time_series_fm_values_sub
+    procedure :: newFmDT => new_time_series_fm_DT_sub
+
+    procedure :: newTemp => new_empty_temp_series_sub
+    procedure :: addTemp => add_record_to_temp_series_sub
+    procedure :: resizeTemp => right_size_temp_series_sub
+
     procedure :: findDateMinAndMax => find_min_and_max_date_sub
     procedure :: findDataGaps => find_data_gaps_fn
     procedure :: findHydroEvents => find_hydro_events_fn
@@ -68,6 +79,84 @@ module tsp_time_series_manager
   end type T_TIME_SERIES
 
 contains
+
+!------------------------------------------------------------------------------
+
+  subroutine new_empty_temp_series_sub(this, iInitSize)
+
+    class(T_TIME_SERIES) :: this
+    integer (kind=T_INT), intent(in), optional :: iInitSize
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iStat
+    integer (kind=T_INT) :: iSize
+
+    if(present(iInitSize) ) then
+      iSize = iInitSize
+    else
+      iSize = 1825  ! room for 5 years of daily data
+    endif
+
+    allocate(this%tData(iSize), stat=iStat)
+    call assert(iStat==0, "Problem allocating memory for temporary time series" , &
+      trim(__FILE__), __LINE__)
+
+  end subroutine new_empty_temp_series_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine add_record_to_temp_series_sub(this, rValue, tDate, sDataFlag)
+
+    class(T_TIME_SERIES) :: this
+    real(kind=T_SGL) :: rValue
+    type(T_DATETIME) :: tDate
+    character(len=*) :: sDataFlag
+
+    ! [ LOCALS ]
+    type(T_TIME_SERIES_DATA), dimension(:), allocatable :: tTempData
+    integer (kind=T_INT) :: iStat
+
+    if(this%iCurrentRecord + 1 > size(this%tData) ) then  ! need to increase array size
+      allocate(tTempData(size(this%tData)), stat=iStat)
+      call assert(iStat==0,"Memory allocation error", &
+        trim(__FILE__),__LINE__)
+      tTempData = this%tData
+      deallocate(this%tData)
+      allocate(this%tData(int(this%iCurrentRecord * 1.3333)), stat=iStat)
+      call assert(iStat==0,"Memory allocation error", &
+        trim(__FILE__),__LINE__)
+      this%tData(1:this%iCurrentRecord) = tTempData(1:this%iCurrentRecord)
+      deallocate(tTempData)
+
+    endif
+
+    this%iCurrentRecord = this%iCurrentRecord + 1
+    this%tData(this%iCurrentRecord)%rValue = rValue
+    this%tData(this%iCurrentRecord)%tDT = tDate
+    this%tData(this%iCurrentRecord)%sDataFlag = trim(sDataFlag)
+
+  end subroutine add_record_to_temp_series_sub
+
+  subroutine right_size_temp_series_sub(this)
+
+    class(T_TIME_SERIES) :: this
+
+    ! [ LOCALS ]
+    type(T_TIME_SERIES_DATA), dimension(:), allocatable :: tTempData
+    integer (kind=T_INT) :: iStat
+
+    allocate(tTempData(count(this%tData%rValue > rNEAR_ZERO) ), stat = iStat)
+      call assert(iStat==0,"Memory allocation error", &
+        trim(__FILE__),__LINE__)
+    tTempData = pack(this%tData,this%tData%rValue > rNEAR_ZERO)
+    deallocate(this%tData)
+    allocate(this%tData(size(tTempData)), stat=iStat)
+      call assert(iStat==0,"Memory allocation error", &
+        trim(__FILE__),__LINE__)
+    this%tData = tTempData
+    deallocate(tTempData)
+
+  end subroutine right_size_temp_series_sub
 
 !------------------------------------------------------------------------------
 
@@ -432,7 +521,7 @@ contains
 
           print *, i, iNumGaps, iSize, size(pDateRange)
           iNumGaps = iNumGaps + 1
-          call pDateRange(iNumGaps)%new(tStartDate, this%tData(i-1)%tDT)
+          call pDateRange(iNumGaps)%newFmDT(tStartDate, this%tData(i-1)%tDT)
           tStartDate = this%tData(i+1)%tDT
 
           write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") iNumGaps, &
@@ -445,7 +534,7 @@ contains
 
       ! need to write out info on the *last* gapless interval
       iNumGaps = iNumGaps + 1
-      call pDateRange(iNumGaps)%new(tStartDate, this%tData(iSize)%tDT)
+      call pDateRange(iNumGaps)%newFmDT(tStartDate, this%tData(iSize)%tDT)
       write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") iNumGaps, &
              pDateRange(iNumGaps)%tStartDate%listdate(), &
              pDateRange(iNumGaps)%tEndDate%listdate()
@@ -453,7 +542,7 @@ contains
     else   ! no gaps found; return a single date range encompassing all data
 
       allocate(pDateRange(1) )
-      call pDateRange(1)%new(this%tData(1)%tDT, this%tData(iSize)%tDT)
+      call pDateRange(1)%newFmDT(this%tData(1)%tDT, this%tData(iSize)%tDT)
       write(LU_STD_OUT,fmt="(/,'  ** NO GAPS **',/)")
       write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") 1, &
                 pDateRange(1)%tStartDate%listdate(), &
@@ -666,17 +755,17 @@ contains
 
 !------------------------------------------------------------------------------
 
-  subroutine list_output_sub(this, sDateFormat, iLU)
+  subroutine list_output_sub(this, iLU)
 
     class(T_TIME_SERIES) :: this
-    character(len=*), intent(in), optional :: sDateFormat
+!    character(len=*), intent(in), optional :: sDateFormat
     integer (kind=T_INT), intent(in), optional :: iLU
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: i
     integer (kind=T_INT) :: LU
     integer (kind=T_INT) :: iYear
-    character(len=20) :: sDateFmt
+!    character(len=20) :: sDateFmt
     character (len=256) :: sFormatString
 
     if(present(iLU)) then
@@ -685,11 +774,11 @@ contains
       LU = LU_STD_OUT
     endif
 
-    if(present(sDateFormat)) then
-      sDateFmt = trim(sDateFormat)
-    else
-      sDateFmt = "MM/DD/YYYY"
-    endif
+!    if(present(sDateFormat)) then
+!      sDateFmt = trim(sDateFormat)
+!    else
+!      sDateFmt = "MM/DD/YYYY"
+!    endif
 
     write(LU,fmt="(/,' TIME_SERIES ',a,' ---->')") quote(this%sSeriesName)
 
@@ -700,7 +789,7 @@ contains
       do i=1,size(this%tData)
 
          write(LU,fmt=trim(sFormatString)) trim(this%sSeriesName), &
-            this%tData(i)%tDT%listdatetime(sDateFmt), this%tData(i)%rValue
+            this%tData(i)%tDT%listdatetime(), this%tData(i)%rValue
 
       enddo
 
@@ -1009,15 +1098,31 @@ contains
       integer (kind=T_INT) :: iCount
       character (len=256) :: sBuf
       type (T_DATETIME) :: tStartDate, tEndDate
-      type (T_STATS_COLLECTION), pointer :: pStats
       character (len=MAXNAMELENGTH) :: sSeriesName
       logical (kind=T_LOGICAL) :: lAddSuffix
+      type (T_STATS_COLLECTION), pointer, save :: pStats
 
-      real (kind=T_SGL), dimension(:), allocatable :: rTempValue
-      type (T_DATETIME), dimension(:), allocatable :: tTempDateTime
+!      real (kind=T_SGL), dimension(:), allocatable :: rTempValue
+!      type (T_DATETIME), dimension(:), allocatable :: tTempDateTime
+      type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
 
       character (len=MAXARGLENGTH), dimension(:), pointer :: &
          pNEW_SERIES_NAME, pSTATISTIC, pPERIOD
+
+      ! attempt to reuse pStats object if this call involves the same
+      ! series name as the last call did...
+      if(.not. associated(pStats) ) then
+        allocate(pStats, stat=iStat)
+        call assert(iStat==0,"Problem allocating memory for pStats object", &
+          trim(__FILE__), __LINE__)
+      elseif(.not. str_compare(this%sSeriesName, pStats%sSeriesName) ) then
+        call destroy_stats_object(pStats)
+        allocate(pStats, stat=iStat)
+        call assert(iStat==0,"Problem allocating memory for pStats object", &
+          trim(__FILE__), __LINE__)
+        pStats%sSeriesName = this%sSeriesName
+      endif
+
 
       call processUserSuppliedDateTime(pBlock, tStartDate, tEndDate)
 
@@ -1033,10 +1138,17 @@ contains
       call Assert(iCount > 0, "Problem calculating PERIOD_STATISTICs: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
       ! allocate memory for temporary data array
-      allocate(rTempValue(iCount))
-      allocate(tTempDateTime(iCount))
-      rTempValue = pack(this%tData%rValue, this%tData%lSelect)
-      tTempDateTime = pack(this%tData%tDT, this%tData%lSelect)
+!      allocate(rTempValue(iCount))
+!      allocate(tTempDateTime(iCount))
+!      rTempValue = pack(this%tData%rValue, this%tData%lSelect)
+!      tTempDateTime = pack(this%tData%tDT, this%tData%lSelect)
+
+      ! create a subset of data selected by user defined date range
+      allocate(tData(iCount) , stat=iStat)
+
+      call assert(iStat==0, "Problem allocating memory", &
+        trim(__FILE__), __LINE__)
+      tData = pack(this%tData, this%tData%lSelect)
 
       pSTATISTIC => pBlock%getString("STATISTIC")
       if(str_compare(pSTATISTIC(1), "NA")) pSTATISTIC(1) = "mean"
@@ -1066,28 +1178,30 @@ contains
         lAddSuffix = lTRUE
       else
         do i=1,iSize
-          pTempSeries%sSeriesName = pNEW_SERIES_NAME(i)
+          pTempSeries(i)%sSeriesName = pNEW_SERIES_NAME(i)
         enddo
       endif
 
-      ! all kinds of period statistics are calculated by invoking
-      ! "create_stats_object"...now we have to copy the appropriate
-      ! results to time series data structures
-      pStats => create_stats_object(rTempValue, tTempDateTime%iMonth, &
-           tTempDateTime%iYear, tTempDateTime%iJulianDay)
-
       do i=1,iSize
+
+        ! **** calculate mean monthly statistics ****
         if(str_compare(pPERIOD(i),"month_one") ) then
 
           iStatSize = 12
 
           allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
+
           pTempSeries(i)%iDataType = iSUMMARY_BY_MONTH
           pTempSeries(i)%tStartDate = tStartDate
           pTempSeries(i)%tEndDate = tEndDate
           do j=1,iStatSize
             pTempSeries(i)%tData(j)%tDT%iMonth = j
           enddo
+
+          if(.not. associated(pStats%pByMonth) ) then
+            pStats%pByMonth => calc_stats_by_month(tData%rValue, &
+                                       tData%tDT%iMonth, tData%tDT%iJulianDay)
+          endif
 
           if(str_compare(pSTATISTIC(i), "sum") ) then
 
@@ -1100,8 +1214,10 @@ contains
           elseif(str_compare(pSTATISTIC(i), "mean") ) then
 
             pTempSeries(i)%tData%rValue = pStats%pByMonth%rMean
+
             pTempSeries(i)%sDescription = &
               "Monthly mean for time series "//quote(sSeriesName)
+
             if(lAddSuffix) pTempSeries(i)%sSeriesName = &
                trim(pTempSeries(i)%sSeriesName)//"mav"
 
@@ -1144,7 +1260,13 @@ contains
 
           endif
 
+        ! **** calculate monthly mean statistics ****
         elseif(str_compare(pPERIOD(i),"month_many") ) then
+
+          if(.not. associated(pStats%pByYearAndMonth) ) then
+            pStats%pByYearAndMonth => calc_stats_by_year_and_month(tData%rValue, &
+                               tData%tDT%iMonth, tData%tDT%iYear, tData%tDT%iJulianDay)
+          endif
 
           iStatSize = count(pStats%pByYearAndMonth%lValid)
 
@@ -1152,6 +1274,7 @@ contains
           pTempSeries(i)%iDataType = iMONTHLY_DATA
           pTempSeries(i)%tStartDate = tStartDate
           pTempSeries(i)%tEndDate = tEndDate
+
 
           j=0
           do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
@@ -1267,7 +1390,13 @@ contains
 
           endif
 
+        ! **** calculate annual statistics ****
         elseif(str_compare(pPERIOD(i),"year") ) then
+
+          if(.not. associated(pStats%pByYear) ) then
+            pStats%pByYear => calc_stats_by_year(tData%rValue, &
+                                   tData%tDT%iYear, tData%tDT%iJulianDay)
+          endif
 
           iStatSize = count(pStats%pByYear%lValid)
 
@@ -1275,6 +1404,7 @@ contains
           pTempSeries(i)%iDataType = iANNUAL_DATA
           pTempSeries(i)%tStartDate = tStartDate
           pTempSeries(i)%tEndDate = tEndDate
+
           iFirstYear =  lbound(pStats%pByYear,1)
           k = 0
           do j = 1, size(pStats%pByYear)
@@ -1348,6 +1478,10 @@ contains
         endif
 
       enddo
+
+      if (associated(pNEW_SERIES_NAME) ) deallocate(pNEW_SERIES_NAME)
+      if (associated(pSTATISTIC) ) deallocate(pSTATISTIC)
+      if (associated(pPERIOD) ) deallocate(pPERIOD)
 
   end function calculate_period_statistics_fn
 

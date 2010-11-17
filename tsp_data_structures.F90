@@ -1,4 +1,6 @@
 !     Last change:  J     9 Sep 2004    5:38 pm
+!#define __FILE__
+!#define __LINE__ 999
 module tsp_data_structures
 
   implicit none
@@ -9,17 +11,22 @@ module tsp_data_structures
   integer, parameter    :: MAXARGLENGTH = 256
   integer, parameter    :: MAXBLOCKLENGTH = 10000
 
-
   ! Define the sizes of base types used in the model
   integer*2, public, parameter :: T_LOGICAL = 4
+!  integer*2, public, parameter :: T_LOGICAL = 3
   integer*2, public, parameter :: T_INT = 4
+!  integer*2, public, parameter :: T_INT = 3
   integer*2, public, parameter :: T_SHORT = 2
   integer*2, public, parameter :: T_BYTE = 1
 
 ! Define machine-independent sizes for base types
   integer*2, public, parameter :: T_SGL = SELECTED_REAL_KIND(p=6,r=37)
+!  integer*2, public, parameter :: T_SGL = 1
 !  integer*2, public, parameter :: T_SGL = SELECTED_REAL_KIND(p=13,r=307)
+!  integer*2, public, parameter :: T_INT = SELECTED_INT_KIND(37)
+!  integer*2, public, parameter :: T_DBL = 2
   integer*2, public, parameter :: T_DBL = SELECTED_REAL_KIND(p=13,r=200)
+!  integer*2, public, parameter :: T_DBL = 8
   integer*2, public, parameter :: T_CPLX_SGL = KIND((T_SGL, T_SGL))
   integer*2, public, parameter :: T_CPLX_DBL = KIND((T_DBL, T_DBL))
 
@@ -31,7 +38,7 @@ module tsp_data_structures
   logical (kind=T_LOGICAL), public, parameter :: lTRUE = .true._T_LOGICAL
   logical (kind=T_LOGICAL), public, parameter :: lFALSE = .false._T_LOGICAL
   real (kind=T_SGL), public, parameter :: rNEAR_TINY = -huge(rZERO) + 1.
-  real (kind=T_SGL), public, parameter :: rNODATA = -99999_T_SGL
+  real (kind=T_SGL), public, parameter :: rNODATA = -99999.0_T_SGL
   real (kind=T_INT), public, parameter :: iNODATA = -99999_T_INT
 
   logical (kind=T_LOGICAL) :: lAssertAlwaysFatal = lTRUE
@@ -56,9 +63,5 @@ module tsp_data_structures
 
    character (len=256), public :: sMostRecentListOutputFile = "none"
    character (len=256), public :: sMostRecentInstructionFile = "none"
-
-
-contains
-
 
 end module tsp_data_structures

@@ -38,7 +38,7 @@ module tsp_statistics
    integer (kind=T_INT), parameter :: iNUM_QUANTILES = 21
    integer (kind=T_INT), parameter :: iNUM_PERIODS = 5
 
-   type T_HI_STATS
+   type T_STATS
       integer (kind=T_INT) :: iCount = 0
       real (kind=T_SGL) :: rSum = rZERO
       real (kind=T_SGL) :: rMean = rZERO
@@ -56,13 +56,14 @@ module tsp_statistics
       real (kind=T_SGL), dimension(iNUM_PERIODS) :: rPeriodMin = rZERO
       real (kind=T_SGL), dimension(iNUM_PERIODS) :: rPeriodMax = rZERO
       logical (kind=T_LOGICAL) :: lValid = lFALSE
-   end type T_HI_STATS
+   end type T_STATS
 
    type T_STATS_COLLECTION
-     type (T_HI_STATS), dimension(:), pointer :: pByYear
-     type (T_HI_STATS), dimension(:), pointer :: pByMonth
-     type (T_HI_STATS), dimension(:,:), pointer :: pByYearAndMonth
-     type (T_HI_STATS), pointer :: pAllRecords
+     character (len=MAXNAMELENGTH) :: sSeriesName = "n/a"
+     type (T_STATS), dimension(:), pointer :: pByYear => null()
+     type (T_STATS), dimension(:), pointer :: pByMonth => null()
+     type (T_STATS), dimension(:,:), pointer :: pByYearAndMonth => null()
+     type (T_STATS), pointer :: pAllRecords => null()
    end type T_STATS_COLLECTION
 
    real(kind=T_SGL), dimension(iNUM_QUANTILES), parameter :: rSTD_PROBABILITIES = (/ &
@@ -79,15 +80,40 @@ module tsp_statistics
      T_AVERAGING_PERIOD(90, '90-day') &
      /)
 
+   interface quick_sort
+     module procedure quick_sort_real
+     module procedure quick_sort_int
+     module procedure quick_sort_str
+   end interface quick_sort
+
    contains
 
-function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
+subroutine destroy_stats_object(pStats)
+
+   type (T_STATS_COLLECTION), pointer :: pStats
+
+   if(associated(pStats) ) then
+
+     if(associated(pStats%pByYear) ) deallocate(pStats%pByYear)
+     if(associated(pStats%pByMonth) ) deallocate(pStats%pByMonth)
+     if(associated(pStats%pByYearAndMonth) ) deallocate(pStats%pByYearAndMonth)
+     if(associated(pStats%pAllRecords) ) deallocate(pStats%pAllRecords)
+     deallocate(pStats)
+
+   endif
+
+end subroutine destroy_stats_object
+
+!------------------------------------------------------------------------------
+
+function create_stats_object(rData, iMonth, iYear, iJulianDay, sSeriesName)  result(pStats)
 
    real (kind=T_SGL), dimension(:) :: rData
    integer (kind=T_BYTE), dimension(:) :: iMonth
    integer (kind=T_SHORT), dimension(:) :: iYear
    integer (kind=T_INT), dimension(:) :: iJulianDay
    type (T_STATS_COLLECTION), pointer :: pStats
+   character (len=*), intent(in) :: sSeriesName
 
    ! [ LOCALS ]
    integer (kind=T_INT) :: iNumRecs
@@ -105,76 +131,82 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay)  result(pStats)
    call Assert( iStat == 0, &
      "Could not allocate memory for statistics collections data object")
 
-   allocate(pStats%pByYear(iFirstYear:iLastYear), stat=iStat)
-   call Assert( iStat == 0, &
-     "Could not allocate memory for 'ByYear' statistics data object")
+   pStats%sSeriesName = trim(sSeriesName)
 
-   allocate(pStats%pByMonth(12), stat=iStat)
-   call Assert( iStat == 0, &
-     "Could not allocate memory for 'ByMonth' statistics data object")
+!   allocate(pStats%pByYear(iFirstYear:iLastYear), stat=iStat)
+!   call Assert( iStat == 0, &
+!     "Could not allocate memory for 'ByYear' statistics data object")
+
+!   allocate(pStats%pByMonth(12), stat=iStat)
+!   call Assert( iStat == 0, &
+!     "Could not allocate memory for 'ByMonth' statistics data object")
 
    ! calculate base statistics by month over all years
-   do i=1,12
-     allocate(rSubset(count(iMonth==i)))
-     allocate(iJD(count(iMonth==i)))
+!   do i=1,12
+!     allocate(rSubset(count(iMonth==i)))
+!     allocate(iJD(count(iMonth==i)))
+!
+!     ! create a subset of the data for a given month
+!     rSubset = PACK(rData,iMonth==i)
+!     iJD = PACK(iJulianDay,iMonth==i)
+!
+!     if(size(rSubset) < 26) then
+!       pStats%pByMonth(i)%lValid = lFALSE
+!     else
+!       pStats%pByMonth(i) = calc_base_stats(rSubset, iJD)
+!     endif
+!
+!     deallocate(rSubset)
+!     deallocate(iJD)
+!   enddo
 
-     ! create a subset of the data for a given month
-     rSubset = PACK(rData,iMonth==i)
-     iJD = PACK(iJulianDay,iMonth==i)
+   pStats%pByMonth => calc_stats_by_month(rData, iMonth, iJulianDay)
 
-     if(size(rSubset) < 26) then
-       pStats%pByMonth(i)%lValid = lFALSE
-     else
-       pStats%pByMonth(i) = calc_base_stats(rSubset, iJD)
-     endif
+!   allocate(pStats%pByYearAndMonth(iFirstYear:iLastYear,12), stat=iStat)
+!   call Assert( iStat == 0, &
+!     "Could not allocate memory for 'ByYearAndMonth' statistics data object")
+!
+!   ! calculate annual statistics
+!   do i=iFirstYear,iLastYear
+!
+!     allocate(rSubset(count( iYear==i )))
+!     allocate(iJD(count( iYear==i )))
+!
+!     ! create a subset of the data for a given month/year combination
+!     rSubset = PACK(rData, iYear==i)
+!     iJD = PACK(iJulianDay, iYear==i)
+!
+!     if(size(rSubset) < 350) then
+!         pStats%pByYear(i)%lValid = lFALSE
+!       else
+!         pStats%pByYear(i) = calc_base_stats(rSubset, iJD)
+!     endif
+!
+!     deallocate(rSubset)
+!     deallocate(iJD)
+!
+!     ! calculate monthly statistics for the current year
+!     do j=1,12
+!
+!       allocate(rSubset(count(iMonth==j .and. iYear==i )))
+!       allocate(iJD(count(iMonth==j .and. iYear==i )))
+!
+!       ! create a subset of the data for a given month/year combination
+!       rSubset = PACK(rData,iMonth==j .and. iYear==i)
+!!
+ !      if(size(rSubset) < 26) then
+ !        pStats%pByYearAndMonth(i,j)%lValid = lFALSE
+ !      else
+!         pStats%pByYearAndMonth(i,j) = calc_base_stats(rSubset, iJD)
+!       endif
+!
+!       deallocate(rSubset)
+!       deallocate(iJD)
+!     enddo
+!   enddo
 
-     deallocate(rSubset)
-     deallocate(iJD)
-   enddo
-
-   allocate(pStats%pByYearAndMonth(iFirstYear:iLastYear,12), stat=iStat)
-   call Assert( iStat == 0, &
-     "Could not allocate memory for 'ByYearAndMonth' statistics data object")
-
-   ! calculate annual statistics
-   do i=iFirstYear,iLastYear
-
-     allocate(rSubset(count( iYear==i )))
-     allocate(iJD(count( iYear==i )))
-
-     ! create a subset of the data for a given month/year combination
-     rSubset = PACK(rData, iYear==i)
-     iJD = PACK(iJulianDay, iYear==i)
-
-     if(size(rSubset) < 350) then
-         pStats%pByYear(i)%lValid = lFALSE
-       else
-         pStats%pByYear(i) = calc_base_stats(rSubset, iJD)
-     endif
-
-     deallocate(rSubset)
-     deallocate(iJD)
-
-     ! calculate monthly statistics for the current year
-     do j=1,12
-
-       allocate(rSubset(count(iMonth==j .and. iYear==i )))
-       allocate(iJD(count(iMonth==j .and. iYear==i )))
-
-       ! create a subset of the data for a given month/year combination
-       rSubset = PACK(rData,iMonth==j .and. iYear==i)
-       iJD = PACK(iJulianDay,iMonth==j .and. iYear==i)
-
-       if(size(rSubset) < 26) then
-         pStats%pByYearAndMonth(i,j)%lValid = lFALSE
-       else
-         pStats%pByYearAndMonth(i,j) = calc_base_stats(rSubset, iJD)
-       endif
-
-       deallocate(rSubset)
-       deallocate(iJD)
-     enddo
-   enddo
+    pStats%pByYearAndMonth => calc_stats_by_year_and_month(rData, iMonth, iYear, iJulianDay)
+    pStats%pByYear => calc_stats_by_year(rData, iYear, iJulianDay)
 
    allocate(pStats%pAllRecords, stat=iStat)
    call Assert( iStat == 0, &
@@ -189,11 +221,153 @@ end function create_stats_object
 
 !------------------------------------------------------------------------------
 
+function calc_stats_by_month(rData, iMonth, iJulianDay)   result(pStatsByMonth)
+
+   real (kind=T_SGL), dimension(:) :: rData
+   integer (kind=T_BYTE), dimension(:) :: iMonth
+   integer (kind=T_INT), dimension(:) :: iJulianDay
+   type (T_STATS), dimension(:), pointer :: pStatsByMonth
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: i, j
+   real (kind=T_SGL), dimension(:), allocatable :: rSubset
+   integer (kind=T_INT), dimension(:), allocatable :: iJD
+   integer (kind=T_INT) :: iStat
+
+   allocate(pStatsByMonth(12), stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for 'pStatsByMonth' statistics data object", &
+     trim(__FILE__), __LINE__)
+
+   ! calculate base statistics by month over all years
+   do i=1,12
+     allocate(rSubset(count(iMonth==i)))
+     allocate(iJD(count(iMonth==i)))
+
+     ! create a subset of the data for a given month
+     rSubset = PACK(rData,iMonth==i)
+     iJD = PACK(iJulianDay,iMonth==i)
+
+     if(size(rSubset) < 26) then
+       pStatsByMonth(i)%lValid = lFALSE
+     else
+       pStatsByMonth(i) = calc_base_stats(rSubset, iJD)
+     endif
+
+     deallocate(rSubset)
+     deallocate(iJD)
+   enddo
+
+end function calc_stats_by_month
+
+!------------------------------------------------------------------------------
+
+function calc_stats_by_year_and_month(rData, iMonth, iYear, iJulianDay) &
+                                                         result(pStatsByYearAndMonth)
+
+   real (kind=T_SGL), dimension(:) :: rData
+   integer (kind=T_BYTE), dimension(:) :: iMonth
+   integer (kind=T_SHORT), dimension(:) :: iYear
+   integer (kind=T_INT), dimension(:) :: iJulianDay
+   type (T_STATS), dimension(:,:), pointer :: pStatsByYearAndMonth
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: i, j
+   integer (kind=T_INT) :: iFirstYear, iLastYear
+   integer (kind=T_INT) :: iStat
+   real (kind=T_SGL), dimension(:), allocatable :: rSubset
+   integer (kind=T_INT), dimension(:), allocatable :: iJD
+
+   iFirstYear = MINVAL(iYear)
+   iLastYear = MAXVAL(iYear)
+
+   allocate(pStatsByYearAndMonth(iFirstYear:iLastYear,12), stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for 'pStatsByYearAndMonth' statistics data object", &
+     trim(__FILE__),__LINE__)
+
+   do i=iFirstYear,iLastYear
+
+     ! calculate monthly statistics for the current year
+     do j=1,12
+
+       allocate(rSubset(count(iMonth==j .and. iYear==i )))
+       allocate(iJD(count(iMonth==j .and. iYear==i )))
+
+       ! create a subset of the data for a given month/year combination
+       rSubset = PACK(rData,iMonth==j .and. iYear==i)
+       iJD = PACK(iJulianDay,iMonth==j .and. iYear==i)
+
+       if(count(iMonth==j .and. iYear==i) < 26) then
+         pStatsByYearAndMonth(i,j)%lValid = lFALSE
+       else
+
+!         pStatsByYearAndMonth(i,j) = calc_base_stats(PACK(rData,iMonth==j .and. iYear==i), &
+!             PACK(iJulianDay,iMonth==j .and. iYear==i) )
+         pStatsByYearAndMonth(i,j) = calc_base_stats(rSubset, iJD)
+       endif
+
+       deallocate(rSubset)
+       deallocate(iJD)
+     enddo
+   enddo
+
+end function calc_stats_by_year_and_month
+
+!------------------------------------------------------------------------------
+
+function calc_stats_by_year(rData, iYear, iJulianDay)  result(pStatsByYear)
+
+   real (kind=T_SGL), dimension(:) :: rData
+   integer (kind=T_SHORT), dimension(:) :: iYear
+   integer (kind=T_INT), dimension(:) :: iJulianDay
+   type (T_STATS), dimension(:), pointer :: pStatsByYear
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: i, j
+   integer (kind=T_INT) :: iFirstYear, iLastYear
+   integer (kind=T_INT) :: iStat
+   real (kind=T_SGL), dimension(:), allocatable :: rSubset
+   integer (kind=T_INT), dimension(:), allocatable :: iJD
+
+   iFirstYear = MINVAL(iYear)
+   iLastYear = MAXVAL(iYear)
+
+   allocate(pStatsByYear(iFirstYear:iLastYear), stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for 'pStatsByYear' statistics data object", &
+     trim(__FILE__),__LINE__)
+
+   ! calculate annual statistics
+   do i=iFirstYear,iLastYear
+
+     allocate(rSubset(count( iYear==i )))
+     allocate(iJD(count( iYear==i )))
+
+     ! create a subset of the data for a given month/year combination
+     rSubset = PACK(rData, iYear==i)
+     iJD = PACK(iJulianDay, iYear==i)
+
+     if(size(rSubset) < 350) then
+         pStatsByYear(i)%lValid = lFALSE
+       else
+         pStatsByYear(i) = calc_base_stats(rSubset, iJD)
+     endif
+
+     deallocate(rSubset)
+     deallocate(iJD)
+
+   enddo
+
+end function calc_stats_by_year
+
+!------------------------------------------------------------------------------
+
 function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
 
    real (kind=T_SGL), dimension(:) :: rData
    integer (kind=T_INT), dimension(:) :: iJulianDay
-   type (T_HI_STATS) :: pBaseStats
+   type (T_STATS) :: pBaseStats
 
    ! [ LOCALS ]
    integer (kind=T_INT) :: i,j,k
@@ -201,17 +375,17 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
    real (kind=T_SGL) :: rMean
    integer (kind=T_INT) :: iMaxPeriodIndex
    integer (kind=T_INT) ,dimension(size(rData)):: iOriginalOrder
-   real (kind=T_SGL), dimension(size(rData)) :: rSortedData
+!  real (kind=T_SGL), dimension(size(rData)) :: rSortedData
 
-   rSortedData = rData
+!   rSortedData = rData
 
-   call quick_sort(rSortedData, iOriginalOrder)
+!   call quick_sort(rSortedData, iOriginalOrder)
 
    pBaseStats%iCount = size(rData)
 
    pBaseStats%rSum = sum(rData)
 
-   pBaseStats%rMedian = median(rData)
+!   pBaseStats%rMedian = median(rData)
 
    pBaseStats%rMean = mean(rData)
    pBaseStats%rVariance = variance(rData)
@@ -219,10 +393,13 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
    pBaseStats%rStddev = sqrt(pBaseStats%rVariance)
    if(pBaseStats%rMean /= 0.) pBaseStats%rCV = pBaseStats%rStddev / pBaseStats%rMean
 
-   do i=1,iNUM_QUANTILES
-     pBaseStats%rQuantile(i) = quantile(rSTD_PROBABILITIES(i), rSortedData)
-     pBaseStats%rExceedance(iNUM_QUANTILES - i + 1) = pBaseStats%rQuantile(i)
-   end do
+!   do i=1,iNUM_QUANTILES
+!     pBaseStats%rQuantile(i) = quantile(rSTD_PROBABILITIES(i), rSortedData)
+!     pBaseStats%rExceedance(iNUM_QUANTILES - i + 1) = pBaseStats%rQuantile(i)
+!   end do
+
+   pBaseStats%rQuantile = quantiles(rSTD_PROBABILITIES, rData)
+   pBaseStats%rMedian = pBaseStats%rQuantile(P50)
 
    pBaseStats%rMin = MINVAL(rData)
    pBaseStats%rMax = MAXVAL(rData)
@@ -244,7 +421,10 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
      iMaxPeriodIndex = D1
    endif
 
+   ! iterate over the indices: 1-day, 3-day, 7-day, 30-day, 90-day
    do i=1,iMaxPeriodIndex
+     ! now iterate over all of rData, calculating the mean value for
+     ! a given averaging period; track the extrema
      do j=1,size(rData) - AVERAGING_PERIOD(i)%iDaysInPeriod + 1
        k = j + AVERAGING_PERIOD(i)%iDaysInPeriod - 1
        rMean = SUM(rData(j:k)) / AVERAGING_PERIOD(i)%iDaysInPeriod
@@ -487,7 +667,7 @@ end function compute_hyd_indices_ML
 
 subroutine write_base_stats(pBaseStats, sDescription)
 
-  type (T_HI_STATS) :: pBaseStats
+  type (T_STATS) :: pBaseStats
   character (len=*), optional :: sDescription
 
   if(present(sDescription)) then
@@ -662,7 +842,7 @@ end subroutine write_base_stats
 
 !-------------------------------------------------------------------------------------------
 
-  recursive subroutine quick_sort(list, order)
+  recursive subroutine quick_sort_real(list, order)
 
   ! Quick sort routine from:
   ! Brainerd, W.S., Goldberg, C.H. & Adams, J.C. (1990) "Programmer's Guide to
@@ -752,7 +932,195 @@ end subroutine write_base_stats
 
   end subroutine interchange_sort
 
-end subroutine quick_sort
+end subroutine quick_sort_real
+
+!------------------------------------------------------------------------------
+
+  recursive subroutine quick_sort_int(list, order)
+
+  ! Quick sort routine from:
+  ! Brainerd, W.S., Goldberg, C.H. & Adams, J.C. (1990) "Programmer's Guide to
+  ! Fortran 90", McGraw-Hill  ISBN 0-07-000248-7, pages 149-150.
+  ! Modified by Alan Miller to include an associated integer array which gives
+  ! the positions of the elements in the original order.
+
+    implicit none
+    integer (kind=T_INT), dimension (:), intent(in out)  :: list
+    integer (kind=T_INT), dimension (:), intent(out)  :: order
+
+    ! LOCAL VARIABLE
+    integer :: i
+
+    do i = 1, size(list)
+      order(i) = i
+    end do
+
+    call quick_sort_1(1, size(list))
+
+  contains
+
+    recursive subroutine quick_sort_1(left_end, right_end)
+
+      integer, intent(in) :: left_end, right_end
+
+      ! LOCAL VARIABLES
+      integer             :: i, j, itemp
+      integer               :: reference, temp
+      integer, parameter  :: max_simple_sort_size = 6
+
+      if (right_end < left_end + max_simple_sort_size) then
+        ! use interchange sort for small lists
+        call interchange_sort(left_end, right_end)
+
+      else ! use partition ("quick") sort
+
+        reference = list((left_end + right_end)/2)
+        i = left_end - 1; j = right_end + 1
+
+        do ! scan list from left end until element >= reference is found
+          do
+            i = i + 1
+            if (list(i) >= reference) exit
+          end do
+          do ! scan list from right end until element <= reference is found
+            j = j - 1
+            if (list(j) <= reference) exit
+          end do
+
+          if (i < j) then
+            ! swap two out-of-order elements
+            temp = list(i); list(i) = list(j); list(j) = temp
+            itemp = order(i); order(i) = order(j); order(j) = itemp
+          else if (i == j) then
+            i = i + 1
+            exit
+          else
+            exit
+          end if
+        end do
+
+        if (left_end < j) call quick_sort_1(left_end, j)
+        if (i < right_end) call quick_sort_1(i, right_end)
+      end if
+
+  end subroutine quick_sort_1
+
+!-------------------------------------------------------------------------------------------
+
+  subroutine interchange_sort(left_end, right_end)
+
+    integer, intent(in) :: left_end, right_end
+
+    ! LOCAL VARIABLES
+    integer             :: i, j, itemp
+    integer             :: temp
+
+    do i = left_end, right_end - 1
+      do j = i+1, right_end
+        if (list(i) > list(j)) then
+          temp = list(i); list(i) = list(j); list(j) = temp
+          itemp = order(i); order(i) = order(j); order(j) = itemp
+        end if
+      end do
+    end do
+
+  end subroutine interchange_sort
+
+end subroutine quick_sort_int
+
+!-------------------------------------------------------------------------------------------
+
+recursive subroutine quick_sort_str(list, order)
+
+  ! Quick sort routine from:
+  ! Brainerd, W.S., Goldberg, C.H. & Adams, J.C. (1990) "Programmer's Guide to
+  ! Fortran 90", McGraw-Hill  ISBN 0-07-000248-7, pages 149-150.
+  ! Modified by Alan Miller to include an associated integer array which gives
+  ! the positions of the elements in the original order.
+
+    implicit none
+    character(len=*), dimension (:), intent(in out)  :: list
+    integer (kind=T_INT), dimension (:), intent(out)  :: order
+
+    ! LOCAL VARIABLE
+    integer :: i
+
+    do i = 1, size(list)
+      order(i) = i
+    end do
+
+    call quick_sort_1(1, size(list))
+
+  contains
+
+    recursive subroutine quick_sort_1(left_end, right_end)
+
+      integer, intent(in) :: left_end, right_end
+
+      ! LOCAL VARIABLES
+      integer             :: i, j, itemp
+      character(len=MAXNAMELENGTH) :: reference, temp
+      integer, parameter  :: max_simple_sort_size = 6
+
+      if (right_end < left_end + max_simple_sort_size) then
+        ! use interchange sort for small lists
+        call interchange_sort(left_end, right_end)
+
+      else ! use partition ("quick") sort
+
+        reference = list((left_end + right_end)/2)
+        i = left_end - 1; j = right_end + 1
+
+        do ! scan list from left end until element >= reference is found
+          do
+            i = i + 1
+            if ( LGE(list(i),reference) ) exit
+          end do
+          do ! scan list from right end until element <= reference is found
+            j = j - 1
+            if (LLE(list(j),reference) ) exit
+          end do
+
+          if (i < j) then
+            ! swap two out-of-order elements
+            temp = list(i); list(i) = list(j); list(j) = temp
+            itemp = order(i); order(i) = order(j); order(j) = itemp
+          else if (i == j) then
+            i = i + 1
+            exit
+          else
+            exit
+          end if
+        end do
+
+        if (left_end < j) call quick_sort_1(left_end, j)
+        if (i < right_end) call quick_sort_1(i, right_end)
+      end if
+
+  end subroutine quick_sort_1
+
+!-------------------------------------------------------------------------------------------
+
+  subroutine interchange_sort(left_end, right_end)
+
+    integer, intent(in) :: left_end, right_end
+
+    ! LOCAL VARIABLES
+    integer             :: i, j, itemp
+    character (len=MAXNAMELENGTH) :: temp
+
+    do i = left_end, right_end - 1
+      do j = i+1, right_end
+        if (LGT(list(i), list(j)) ) then
+          temp = list(i); list(i) = list(j); list(j) = temp
+          itemp = order(i); order(i) = order(j); order(j) = itemp
+        end if
+      end do
+    end do
+
+  end subroutine interchange_sort
+
+end subroutine quick_sort_str
 
 !-------------------------------------------------------------------------------------------
 

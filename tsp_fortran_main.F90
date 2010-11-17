@@ -1,4 +1,4 @@
-program test
+program tsp_fortran_main
 
   use tsp_data_structures
   use tsp_main_loop
@@ -13,19 +13,24 @@ program test
 
   character (len=256) :: sInputFile
   character (len=256) :: sRecFile
-  character (len=256) :: sDateStr
-  character (len=256) :: sDateStrPretty
-  type (T_BLOCK), dimension(:), pointer :: pB
 
   logical :: lInteractive = lTRUE
   integer  :: iNumArgs
+
+  sRecFile = ""; sInputFile = ""
 
   iReturnCode = -1
 
   ! get number of command-line arguments
   iNumArgs = COMMAND_ARGUMENT_COUNT()
 
-  if(iNumArgs==2) then
+  if(iNumArgs==1) then
+
+    lInteractive = lFALSE
+    ! get actual values of the command-line arguments
+    call GET_COMMAND_ARGUMENT(1,sInputFile)
+
+  elseif(iNumArgs==2) then
 
     lInteractive = lFALSE
     ! get actual values of the command-line arguments
@@ -69,15 +74,17 @@ program test
     read(5,'(a)') sRecFile
   end if
 
-  call openControlFile(sFilename)
+  if(len_trim(sRecFile) > 0) then
+    call openControlFile(sFilename, sRecFile)
+  else
+    call openControlFile(sFilename)
+  endif
 
   do while(iReturnCode /= 0)
     call getNextBlock(sBlockname)
     call continueProcessing(iReturnCode)
   end do
 
-  call summarize()
-
   call finalize()
 
-end program test
+end program tsp_fortran_main

@@ -130,7 +130,7 @@ subroutine open_file_sub(this, sFilename)
 
   this%sFilename = TRIM(sFilename)
 !  this%iLU = getNextLogicalUnit()
-  open(newunit=this%iLU, file=TRIM(sFilename), status='OLD', iostat=iStat)
+  open(unit=newunit(this%iLU), file=TRIM(sFilename), status='OLD', iostat=iStat)
   call Assert(iStat == 0, &
       "Could not open file "//TRIM(sFilename), &
       TRIM(__FILE__),__LINE__)

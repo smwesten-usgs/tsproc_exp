@@ -13,7 +13,7 @@ module tsp_collections
     character (len=MAXNAMELENGTH) :: sObservedSeries = ""
     character (len=MAXNAMELENGTH) :: sModeledSeries = ""
     character (len=MAXNAMELENGTH) :: sObservationGroup = ""
-    character (len=1024) :: sWeightsEquation
+    character (len=1024) :: sWeightsEquation = ""
     real (kind=T_SGL), dimension(:), allocatable :: rWeightValue
   end type T_TS_COMPARISON
 
@@ -21,9 +21,22 @@ module tsp_collections
     character (len=MAXNAMELENGTH) :: sObservedTable = ""
     character (len=MAXNAMELENGTH) :: sModeledTable = ""
     character (len=MAXNAMELENGTH) :: sObservationGroup = ""
-    character (len=1024) :: sWeightsEquation
+    character (len=1024) :: sWeightsEquation = ""
     real (kind=T_SGL), dimension(:), allocatable :: rWeightValue
   end type T_TABLE_COMPARISON
+
+  integer (kind=T_INT), parameter, private :: RED = 0
+  integer (kind=T_INT), parameter, private :: BLACK = 1
+
+  type :: T_NODE
+    type (T_NODE), pointer :: pRight => null()
+    type (T_NODE), pointer :: pLeft => null()
+    type (T_NODE), pointer :: pParent => null()
+    integer (kind=T_INT) :: iColor = RED
+    character (len=256) :: sNodeName = ""
+    type (T_TIME_SERIES), pointer :: pTS => null()
+    type (T_TABLE), pointer :: pTable => null()
+  end type T_NODE
 
   type TIME_SERIES_COLLECTION
     integer (kind=T_INT) :: iNumTimeSeries  = 0
@@ -31,6 +44,8 @@ module tsp_collections
     integer (kind=T_INT) :: iNumTSComparisons = 0
     integer (kind=T_INT) :: iNumTableComparisons = 0
 
+    type (T_NODE), pointer :: pRoot => null()
+    type (T_NODE), pointer :: pCurrent => null()
     type (T_TIME_SERIES), dimension(:), pointer :: pTS => null()
     type (T_TIME_SERIES), pointer :: pTS_Head => null()
     type (T_TS_COMPARISON), dimension(:), allocatable :: tTSComparison
@@ -41,21 +56,30 @@ module tsp_collections
   contains
 
 !    procedure :: add_ts_sub, add_table_sub
-    procedure :: add_ts_link_sub, add_table_link_sub
+!    procedure :: addSeries => add_node_sub
+!    procedure :: addTable => add_node_sub
     procedure :: tsCompare => add_ts_comparison_sub
     procedure :: tableCompare => add_table_comparison_sub
-    generic :: add => add_ts_link_sub, add_table_link_sub
+!    generic :: add => add_ts_link_sub, add_table_link_sub
     procedure :: clear => remove_all_sub
     procedure :: calculate => calc_values_from_equation_fn
     procedure :: newTimeBase => conform_ts_sub
     procedure :: removeTS => remove_ts_link_sub
     procedure :: removeTable => remove_table_link_sub
-    procedure :: summarize => summarize_sub
+    procedure :: insert => add_node_sub
+    procedure :: rotateLeft => rotate_node_left_sub
+    procedure :: rotateRight => rotate_node_right_sub
+    procedure :: rebalanceTree => rebalance_tree_after_insert_sub
+    procedure :: traverse => traverse_entire_tree_sub
+    procedure, public  :: summarize => summarize_sub
+    procedure, private :: summarizeSeries => traverse_tree_summarize_series_sub
+    procedure, private :: summarizeTable => traverse_tree_summarize_table_sub
     procedure :: describe => describe_ts_sub
-    procedure :: getTS => get_ts_pointer_link_fn
-    procedure :: getTSComparison => get_ts_comparison_pointer_fn
+    procedure :: getNode => find_node_in_tree_fn
+    procedure :: getSeries => get_ts_pointer_node_fn
+    procedure :: getSeriesComparison => get_ts_comparison_pointer_fn
     procedure :: getTableComparison => get_table_comparison_pointer_fn
-    procedure :: getTable => get_table_pointer_link_fn
+    procedure :: getTable => get_table_pointer_node_fn
     procedure :: listTS => list_output_ts_sub
     procedure :: pestWriteTSComparison => pest_write_ts_comparison_sub
     procedure :: pestWriteTableComparison => pest_write_table_comparison_sub
@@ -65,6 +89,296 @@ module tsp_collections
   end type TIME_SERIES_COLLECTION
 
 contains
+
+recursive subroutine traverse_entire_tree_sub(this, pCurrent)
+
+   class(TIME_SERIES_COLLECTION) :: this
+   type (T_NODE), pointer        :: pCurrent
+
+   if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+      call this%traverse(pCurrent%pLeft)
+   end  if
+
+   print *, quote(pCurrent%sNodeName)
+
+   if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+      call this%traverse(pCurrent%pRight)
+   end  if
+
+end subroutine traverse_entire_tree_sub
+
+!------------------------------------------------------------------------------
+
+recursive subroutine traverse_tree_summarize_series_sub(this, pCurrent)
+
+   class(TIME_SERIES_COLLECTION) :: this
+   type (T_NODE), pointer        :: pCurrent
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iMemoryInBytes
+
+   if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+      call this%summarizeSeries(pCurrent%pLeft)
+   end  if
+
+   if(associated(pCurrent%pTS)) then
+     iMemoryInBytes = sizeof(pCurrent%pTS) + sizeof(pCurrent%pTS%tData)
+     write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
+       pCurrent%pTS%sSeriesName, &
+       pCurrent%pTS%tStartDate%prettyDate(), &
+       pCurrent%pTS%tEndDate%prettyDate(), &
+       size(pCurrent%pTS%tData), &
+       MINVAL(pCurrent%pTS%tData%rValue), &
+       SUM(pCurrent%pTS%tData%rValue)/ size(pCurrent%pTS%tData), &
+       MAXVAL(pCurrent%pTS%tData%rValue), &
+       iMemoryInBytes / 1024
+   endif
+
+   if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+      call this%summarizeSeries(pCurrent%pRight)
+   end  if
+
+end subroutine traverse_tree_summarize_series_sub
+
+!------------------------------------------------------------------------------
+
+recursive subroutine traverse_tree_summarize_table_sub(this, pCurrent)
+
+   class(TIME_SERIES_COLLECTION) :: this
+   type (T_NODE), pointer        :: pCurrent
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iMemoryInBytes
+
+   if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+      call this%summarizeTable(pCurrent%pLeft)
+   end  if
+
+   if(associated(pCurrent%pTable)) then
+     iMemoryInBytes = sizeof(pCurrent%pTable) + sizeof(pCurrent%pTable%tTableData)
+     write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
+       pCurrent%pTable%sSeriesName, &
+       pCurrent%pTable%tStartDate%prettyDate(), &
+       pCurrent%pTable%tEndDate%prettyDate(), &
+       TABLE_TYPE(pCurrent%pTable%iTableType)
+   endif
+
+   if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+      call this%summarizeTable(pCurrent%pRight)
+   end  if
+
+end subroutine traverse_tree_summarize_table_sub
+
+!------------------------------------------------------------------------------
+
+!! This function procedure searches a binary search tree for the given element KEY.  It
+!! returns the location of the element, or a null pointer if the element could not be found.
+function find_node_in_tree_fn (this,sNodeName)   result (pPosition)
+   !! INCOMING:   Key    = the given value to be matched with an element of the tree.
+   !!       Root  = a pointer to the root of the tree to be searched.
+   !! RETURNS: A pointer to the element (if Key is found in the tree), or a null pointer (if not found)
+
+   class(TIME_SERIES_COLLECTION) :: this
+   character (len=*), intent(in)   :: sNodeName
+   type (T_NODE), pointer          :: pPosition
+
+   this%pCurrent => this%pRoot
+
+   do
+      if (.not. associated(this%pCurrent ) ) then
+         exit
+      end if
+
+      print *, quote(this%pCurrent%sNodeName)," < = > ",quote(sNodeName)
+
+      if ( LGT(this%pCurrent%sNodeName, sNodeName) ) then                !! Take the left path.
+         this%pCurrent => this%pCurrent%pLeft
+      else if (LLT(this%pCurrent%sNodeName, sNodeName) ) then           !! Take the right path.
+         this%pCurrent => this%pCurrent%pRight
+      else                                        !! The desired element was found.
+         pPosition => this%pCurrent
+         return
+      end  if
+   end  do
+
+   nullify (pPosition)                             !! The element did not exist in the tree.
+
+end function find_node_in_tree_fn
+
+!------------------------------------------------------------------------------
+
+!! This procedure rebalances and re-colors the nodes of a Red-Black sorted binary tree,
+!! following an insertion.  The node pointed at by X has just been inserted into the tree,
+!! and is the node where one of the 4 properties of Red-Black trees may have been violated.
+!! After a breach of Rule 1 has been rectified, X is adjusted to point at its grandparent,
+!! where tests for a breach of the rules is again carried out, and so on for each grandparent
+!! in turn.  If Rules 2 or 3 are breached, one or two rotations of a branch of the tree are
+!! carried out (about the current node X), and the procedure terminates.
+!! When this procedure terminates, the root node is black, and the tree is quasi-balanced,
+!! and the four properties of Red-Black trees are satisfied:
+!!
+!! Rule 1. Every node is either red or black;
+!! Rule 2. Every null pointer is considered to be pointing to an imaginary black node;
+!! Rule 3. If a node is red, then both its children are black; and
+!! Rule 4. Every direct path from the root to a leaf contains the same number of black nodes.
+
+  subroutine rebalance_tree_after_insert_sub(this)
+      !! INCOMING: pCurrent = a pointer to a (red) node that has been inserted in the tree.
+      class(TIME_SERIES_COLLECTION) :: this
+
+      ! [ LOCALS ]
+      type (T_NODE), pointer         :: pX, pY
+      logical                      :: lRedUncle
+      logical                      :: lIterating
+
+      pX => this%pCurrent
+
+      do                                          !! We execute this loop, and re-execute it,
+                                                                                !! when pX and its parent are both red.
+         lIterating = .not. associated (pX, this%pRoot)   !! Cannot iterate when we are at the root.{pXE "ASSOCIATED built-in function"}
+         if (lIterating) then                      !! There must be a parent . . . .
+            lIterating = pX%pParent%iColor == RED
+         end  if                                  !!{pXE "logical operator: .EQV."}{pXE "EQV" \t "see .EQV.}
+         if (lIterating) then                      !! . . . and there must be a grandparent.
+            lIterating = associated (pX%pParent%pParent)
+         end  if
+         if (.not. lIterating) then                !! We enter this loop when pX and its parent are both red.
+            exit
+         end  if
+
+         if (associated (pX%pParent, pX%pParent%pParent%pLeft) ) then
+                                                                                !! The parent is a left node of pX's grandparent.
+            pY => pX%pParent%pParent%pRight            !! Get the address of the uncle.
+            lRedUncle = associated(pY)
+            if (lRedUncle) then
+               lRedUncle = pY%iColor == RED
+            end  if
+            if (lRedUncle) then
+               !! CASE 1.  There is an uncle.  pX and its parent and
+               !! uncle are all red.  Fix violation of Rule 3.
+               pX%pParent%iColor = BLACK             !! The parent must be black.
+               pY%iColor = BLACK                    !! The uncle must be black.
+               pX%pParent%pParent%iColor = RED
+                                                                                !! The grandparent must be red.
+               pX => pX%pParent%pParent               !! Move 2 places up the tree, to the grandparent.
+            else                                  !! The uncle is black, or is non-existent.
+               if (associated (pX, pX%pParent%pRight) ) then !! CASE 2.{pXE "ASSOCIATED built-in function: to compare pointers"}
+                  pX => pX%pParent                   !! Move up the tree.
+                  call this%rotateLeft(pX)
+               end  if
+               !! CASE 3.
+               pX%pParent%iColor = BLACK
+               pX%pParent%pParent%iColor = RED
+               call this%rotateRight(pX%pParent%pParent)
+            end  if
+         !! This segment is the mirror image of the code for the "then" part,
+         !! with the words Right and Left interchanged.
+         else                                     !! The parent is a right node of pX's grandparent.
+            pY => pX%pParent%pParent%pLeft             !! Get the address of the uncle.
+            lRedUncle = associated(pY)
+            if (lRedUncle) then
+               lRedUncle = pY%iColor == RED
+            end  if
+            if (lRedUncle) then                   !! CASE 1.
+               pX%pParent%iColor = BLACK             !! The parent must be black.
+               pY%iColor = BLACK                    !! The uncle must be black.
+               pX%pParent%pParent%iColor = RED
+                                                                                !! The grandparent must be red.
+               pX => pX%pParent%pParent               !! Move 2 places up the tree, to the grandparent.
+            else                                  !! pX and its parent are red, but its uncle is black
+                                                                                !! or is missing.  Fix violation of Rule 3.
+               if (associated (pX, pX%pParent%pLeft) ) then !! CASE 2.
+                  pX => pX%pParent                   !! Move up the tree.
+                  call this%rotateRight(pX)
+               end  if
+               !! CASE 3.
+               pX%pParent%iColor = BLACK
+               pX%pParent%pParent%iColor = RED
+               call this%rotateLeft(pX%pParent%pParent)
+            end  if
+         end  if
+      end  do
+
+      this%pRoot%iColor = BLACK                          !! Ensure that the root is black.
+      this%pCurrent => this%pRoot
+
+  end subroutine rebalance_tree_after_insert_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine rotate_node_left_sub(this, pPivot)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    type(T_NODE), pointer ::  pPivot
+    type (T_NODE), pointer :: pX, pY
+
+    ! set a pointer to the pPivot node (node about which rotation will take place)
+    pX => pPivot
+
+    ! pY is the right child of pX
+    pY => pX%pRight
+
+    ! swap left subtree of pY into right subtree of pX
+    pX%pRight => pY%pLeft
+
+    ! make pX the parent of pY's left subtree
+    if(associated(pY%pLeft) ) pY%pLeft%pParent => pX
+
+    ! pX's parent becomes pY's parent
+    pY%pParent => pX%pParent
+    if(.not. associated(pX%pParent) )then
+      this%pRoot => pY
+    elseif( associated(pX, pX%pParent%pLeft) ) then
+      ! make left pointer of pX's parent point to pY
+      pX%pParent%pLeft => pY
+    else
+      ! make right pointer of pX's parent point to pY
+      pX%pParent%pRight => pY
+    endif
+
+    pY%pLeft => pX
+    pX%pParent => pY
+
+  end subroutine rotate_node_left_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine rotate_node_right_sub(this, pPivot)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    type(T_NODE), pointer ::  pPivot
+    type (T_NODE), pointer :: pX, pY
+
+    ! set a pointer to the pPivot node (node about which rotation will take place)
+    pX => pPivot
+
+    ! pY is the left child of pX
+    pY => pX%pLeft
+
+    ! swap right subtree of pY into left subtree of pX
+    pX%pLeft => pY%pRight
+
+    ! make pX the parent of pY's right subtree
+    if(associated(pY%pRight) ) pY%pRight%pParent => pX
+
+    ! pX's parent becomes pY's parent
+    pY%pParent => pX%pParent
+    if(.not. associated(pX%pParent) )then
+      this%pRoot => pY
+    elseif( associated(pX, pX%pParent%pRight) ) then
+      ! make right pointer of pX's parent point to pY
+      pX%pParent%pRight => pY
+    else
+      ! make left pointer of pX's parent point to pY
+      pX%pParent%pLeft => pY
+    endif
+
+    pY%pRight => pX
+    pX%pParent => pY
+
+  end subroutine rotate_node_right_sub
+
+!------------------------------------------------------------------------------
 
   subroutine add_ts_link_sub(this, pNewSeries)
 
@@ -82,19 +396,21 @@ contains
     pNewSeries%pPrevious => null()
     pCurrentTS => null()
 
-    print *, "associated(this%pTS_Head): ",associated(this%pTS_Head)
-    if(associated(this%pTS_Head)) print *, quote(this%pTS_Head%sSeriesName)
+!    print *, "associated(this%pTS_Head): ",associated(this%pTS_Head)
+!    if(associated(this%pTS_Head)) print *, quote(this%pTS_Head%sSeriesName)
 
     if(.not. associated(this%pTS_Head)) then  ! no series are stored yet; set head node to
                                               ! pNewSeries
       this%pTS_Head => pNewSeries
-      print *, "associated(this%pTS_Head): ",associated(this%pTS_Head)
+!      print *, "associated(this%pTS_Head): ",associated(this%pTS_Head)
       this%pTS_Head%pNext => null()
       this%pTS_Head%pPrevious => null()
       this%iNumTimeSeries = this%iNumTimeSeries + 1
 
-      call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
-        //"There is now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
+      call echolog("  Added: "//trim(pNewSeries%sDescription)//".")
+      call echolog("    [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
+         //pNewSeries%tEndDate%listdate()//" ]")
+      call echolog("    [There is now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
       call echolog("")
 
     else
@@ -102,45 +418,55 @@ contains
       iIteration = 0
 
       ! reset pCurrentTS to the head node
-      pCurrentTS => this%pTS_Head
 
-      do
+      this%pTS_Head%pPrevious => pNewSeries
+      pNewSeries%pNext => this%pTS_Head
+      this%pTS_Head => pNewSeries
 
-        iIteration = iIteration + 1
-        print *, trim(asChar(iIteration))//") "//quote(pCurrentTS%sSeriesName)
-        if(associated(pCurrentTS%pPrevious)) print *,quote(pCurrentTS%pPrevious%sSeriesName)//"<=="
-        if(associated(pCurrentTS%pNext)) print *,"                  ==>"//quote(pCurrentTS%pNext%sSeriesName)
+      this%iNumTimeSeries = this%iNumTimeSeries + 1
+      call echolog("  Added: "//trim(pNewSeries%sDescription)//".")
+      call echolog("    [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
+         //pNewSeries%tEndDate%listdate()//" ]")
+      call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
+      call echolog("")
+
+!      do
+
+!        iIteration = iIteration + 1
+!        print *, trim(asChar(iIteration))//") "//quote(pCurrentTS%sSeriesName)
+!        if(associated(pCurrentTS%pPrevious)) print *,quote(pCurrentTS%pPrevious%sSeriesName)//"<=="
+!        if(associated(pCurrentTS%pNext)) print *,"                  ==>"//quote(pCurrentTS%pNext%sSeriesName)
 
         ! recurse through list until we come to the end of the line
-        if(associated(pCurrentTS%pNext) ) then
-          pCurrentTS => pCurrentTS%pNext
-          cycle
-        else
+!        if(associated(pCurrentTS%pNext) ) then
+!          pCurrentTS => pCurrentTS%pNext
+!          cycle
+!        else
           ! update forward-pointing and backward-pointing pointers
-          if(associated(pNewSeries%pPrevious)) then
-            call warn(lFALSE,"pNewSeries is being reallocated")
-            print *, " (was: "//quote(pNewSeries%pPrevious%sSeriesName)//")"
-          endif
-          pCurrentTS%pNext => pNewSeries
-          pNewSeries%pPrevious => pCurrentTS
-          pNewSeries%pNext => null()
-          this%iNumTimeSeries = this%iNumTimeSeries + 1
-          call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
-            //"There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
-          call echolog("")
-                  print *, trim(asChar(iIteration))//") "//quote(pCurrentTS%sSeriesName)
-          print *, "NEW SERIES ADDED"
-          print *, "  current series:"//quote(pCurrentTS%sSeriesName)
-          if(associated(pCurrentTS%pPrevious)) print *,quote(pCurrentTS%pPrevious%sSeriesName)//"<=="
-          if(associated(pCurrentTS%pNext)) print *,"                  ==>"//quote(pCurrentTS%pNext%sSeriesName)
+!          if(associated(pNewSeries%pPrevious)) then
+!            call warn(lFALSE,"pNewSeries is being reallocated")
+!            print *, " (was: "//quote(pNewSeries%pPrevious%sSeriesName)//")"
+!          endif
+!          pCurrentTS%pNext => pNewSeries
+!          pNewSeries%pPrevious => pCurrentTS
+!          pNewSeries%pNext => null()
+!          this%iNumTimeSeries = this%iNumTimeSeries + 1
+!          call echolog("  Added series "//quote(pNewSeries%sSeriesName)//". " &
+!            //"There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.")
+!          call echolog("")
+!                  print *, trim(asChar(iIteration))//") "//quote(pCurrentTS%sSeriesName)
+!          print *, "NEW SERIES ADDED"
+!          print *, "  current series:"//quote(pCurrentTS%sSeriesName)
+!          if(associated(pCurrentTS%pPrevious)) print *,quote(pCurrentTS%pPrevious%sSeriesName)//"<=="
+!          if(associated(pCurrentTS%pNext)) print *,"                  ==>"//quote(pCurrentTS%pNext%sSeriesName)
+!
+!          print *, "  new series:"//quote(pNewSeries%sSeriesName)
+!          if(associated(pNewSeries%pPrevious)) print *,"  "//quote(pNewSeries%pPrevious%sSeriesName)//"<=="
+!          if(associated(pNewSeries%pNext)) print *,"                    ==>"//quote(pNewSeries%pNext%sSeriesName)
 
-          print *, "  new series:"//quote(pNewSeries%sSeriesName)
-          if(associated(pNewSeries%pPrevious)) print *,"  "//quote(pNewSeries%pPrevious%sSeriesName)//"<=="
-          if(associated(pNewSeries%pNext)) print *,"                    ==>"//quote(pNewSeries%pNext%sSeriesName)
-
-          exit
-        endif
-      enddo
+!          exit
+!        endif
+!      enddo
 
     endif
 
@@ -148,6 +474,88 @@ contains
     nullify(pCurrentTS)
 
   end subroutine add_ts_link_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine add_node_sub(this, pNewSeries, pNewTable)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    type(T_TIME_SERIES), pointer, optional ::  pNewSeries
+    type(T_TABLE), pointer, optional ::  pNewTable
+
+    ! [ LOCALS ]
+    type(T_NODE), pointer :: pParentOfCurrent => null()
+    type(T_NODE), pointer :: pNewNode => null()
+
+    ! set root and current pointer to root
+    this%pCurrent => this%pRoot
+
+
+    allocate(pNewNode)
+
+    ! set the node pointer pTS to the series to be added
+    if(present(pNewSeries) ) then
+      if(associated(pNewSeries) ) then
+        pNewNode%pTS => pNewSeries
+        pNewNode%sNodeName = trim(adjustl(pNewSeries%sSeriesName) )
+        this%iNumTimeSeries = this%iNumTimeSeries + 1
+        call echolog("  Added: "//trim(pNewSeries%sDescription)//".")
+        call echolog("    [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
+           //pNewSeries%tEndDate%listdate()//" ]")
+        call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
+        call echolog("")
+      endif
+    endif
+
+    if(present(pNewTable) ) then
+      if(associated(pNewTable) ) then
+        pNewNode%pTable => pNewTable
+        pNewNode%sNodeName = trim(adjustl(pNewTable%sSeriesName) )
+        this%iNumTables = this%iNumTables + 1
+        call echolog("  Added: "//trim(pNewTable%sDescription)//".")
+        call echolog("    [ date range: "//pNewTable%tStartDate%listdate()//" to " &
+           //pNewTable%tEndDate%listdate()//" ]")
+        call echolog("    [There are now "//trim(asChar(this%iNumTables))//" tables in memory.]")
+        call echolog("")
+      endif
+    endif
+
+    ! find a place in the tree to graft the new node to;
+    ! travel from root to a node containing a null pointer
+    do
+
+      if(.not. associated(this%pCurrent) ) exit
+
+      pParentOfCurrent => this%pCurrent
+
+      if( LLT(pNewNode%sNodeName,this%pCurrent%sNodeName) ) then
+        this%pCurrent => this%pCurrent%pLeft
+      elseif( LGT(pNewNode%sNodeName,this%pCurrent%sNodeName) ) then
+        this%pCurrent => this%pCurrent%pRight
+      else
+        call assert(lFALSE,"Series name "//quote(pNewNode%sNodeName) &
+          //" has already been used. ", &
+          trim(__FILE__),__LINE__)
+        exit
+      endif
+
+    enddo
+    ! upon exit, we have found a node whose left or right pointer field is null
+
+    pNewNode%pParent => pParentOfCurrent
+
+    if(.not. associated(pParentOfCurrent) ) then
+      this%pRoot => pNewNode
+    elseif( LLT(pNewNode%sNodeName,pParentOfCurrent%sNodeName) ) then
+      pParentOfCurrent%pLeft => pNewNode
+    else
+      pParentOfCurrent%pRight => pNewNode
+    endif
+
+    this%pCurrent => pNewNode
+    nullify(pNewNode)
+
+  end subroutine add_node_sub
 
 !------------------------------------------------------------------------------
 
@@ -195,7 +603,7 @@ contains
 
     endif
 
-    nullify(pNewTable)
+!    nullify(pNewTable)
     nullify(pCurrentTable)
 
   end subroutine add_table_link_sub
@@ -812,6 +1220,22 @@ contains
 
 !------------------------------------------------------------------------------
 
+  function get_ts_pointer_node_fn(this, sSeriesName)    result( pTS )
+
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sSeriesName
+    type(T_TIME_SERIES), pointer :: pTS
+
+    ! [ LOCALS ]
+    type (T_NODE), pointer :: pNode
+
+    pNode => this%getNode(sSeriesName)
+    pTS => pNode%pTS
+
+  end function get_ts_pointer_node_fn
+
+!------------------------------------------------------------------------------
+
   function get_table_pointer_link_fn(this, sSeriesName)    result( pTable )
 
     ! get a pointer to a table from a COLLECTION of time series objects (this)
@@ -859,6 +1283,22 @@ contains
     nullify(pCurrent)
 
   end function get_table_pointer_link_fn
+
+!------------------------------------------------------------------------------
+
+  function get_table_pointer_node_fn(this, sSeriesName)    result( pTable )
+
+    class(TIME_SERIES_COLLECTION) :: this
+    character (len=*) :: sSeriesName
+    type(T_TABLE), pointer :: pTable
+
+    ! [ LOCALS ]
+    type (T_NODE), pointer :: pNode
+
+    pNode => this%getNode(sSeriesName)
+    pTable => pNode%pTable
+
+  end function get_table_pointer_node_fn
 
 !------------------------------------------------------------------------------
 
@@ -997,51 +1437,54 @@ contains
     type (T_TIME_SERIES), pointer :: pObservedSeries => null()
     type (T_TIME_SERIES), pointer :: pModeledSeries => null()
     type(T_TIME_SERIES), pointer :: pCurrentTS => null()
+    type (T_NODE), pointer :: pCurrent => null()
     type (T_TABLE), pointer :: pObservedTable => null()
     type (T_TABLE), pointer :: pModeledTable => null()
     type (T_TABLE), pointer :: pCurrentTable => null()
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE OBJECTS CURRENTLY IN MEMORY ***'
-    write(LU_STD_OUT, &
-      fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
-           t80,'MAX',t86,'MEMORY(kb)',/)")
 
-    if(associated(this%pTS_Head)) then
-
-      pCurrentTS => this%pTS_Head
-
-      do
-
-        if(allocated(pCurrentTS%tData)) then
-          iMemoryInBytes = sizeof(pCurrentTS) + sizeof(pCurrentTS%tData)
-          write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
-            pCurrentTS%sSeriesName, &
-            pCurrentTS%tStartDate%prettyDate(), &
-            pCurrentTS%tEndDate%prettyDate(), &
-            size(pCurrentTS%tData), &
-            MINVAL(pCurrentTS%tData%rValue), &
-            SUM(pCurrentTS%tData%rValue)/ size(pCurrentTS%tData), &
-            MAXVAL(pCurrentTS%tData%rValue), &
-            iMemoryInBytes / 1024
-            iSum = iSum + size(pCurrentTS%tData)
-        else
-          iMemoryInBytes = sizeof(pCurrentTS)
-
-          write(LU_STD_OUT,fmt="(a,t20,51x,i6,'k')") &
-            pCurrentTS%sSeriesName, iMemoryInBytes / 1024
-
-        endif
-
-        ! recurse through list until we come to the end of the line
-        if(associated(pCurrentTS%pNext) ) then
-          pCurrentTS => pCurrentTS%pNext
-          cycle
-        else
-          exit
-        endif
-      enddo
-
+    if(this%iNumTimeSeries > 0) then
+      pCurrent => this%pRoot
+      write(LU_STD_OUT, &
+        fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
+             t80,'MAX',t86,'MEMORY(kb)',/)")
+      call this%summarizeSeries(pCurrent)
+    else
+      write(LU_STD_OUT,fmt="(a,/)") '     ===> No TIME SERIES objects currently in memory <==='
     endif
+
+!      do
+!
+!        if(allocated(pCurrentTS%tData)) then
+!          iMemoryInBytes = sizeof(pCurrentTS) + sizeof(pCurrentTS%tData)
+!          write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k')") &
+!            pCurrentTS%sSeriesName, &
+!            pCurrentTS%tStartDate%prettyDate(), &
+!            pCurrentTS%tEndDate%prettyDate(), &
+!            size(pCurrentTS%tData), &
+!            MINVAL(pCurrentTS%tData%rValue), &
+!            SUM(pCurrentTS%tData%rValue)/ size(pCurrentTS%tData), &
+!            MAXVAL(pCurrentTS%tData%rValue), &
+!            iMemoryInBytes / 1024
+!            iSum = iSum + size(pCurrentTS%tData)
+!        else
+!          iMemoryInBytes = sizeof(pCurrentTS)
+!
+!          write(LU_STD_OUT,fmt="(a,t20,51x,i6,'k')") &
+!            pCurrentTS%sSeriesName, iMemoryInBytes / 1024
+!
+!        endif
+
+!        ! recurse through list until we come to the end of the line
+!        if(associated(pCurrentTS%pNext) ) then
+!          pCurrentTS => pCurrentTS%pNext
+!          cycle
+!        else
+!          exit
+!        endif
+!      enddo
+
 
 !     if(.not. associated(this%pTS)) then
 !       write(LU_STD_OUT,fmt="(a,/)") '     ===> No TIME SERIES objects currently in memory <==='
@@ -1106,44 +1549,55 @@ contains
 !       end do
 !     endif
 
-    if(.not. associated(this%pTable_Head)) then
-      write(LU_STD_OUT,fmt="(/,a,/)") '     ===> No TABLE objects currently in memory <==='
-
-    else
-
-
+    if(this%iNumTables > 0) then
+      pCurrent => this%pRoot
       write(LU_STD_OUT, &
         fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
-
-
-      pCurrentTable => this%pTable_Head
-
-      do
-
-        if(allocated(pCurrentTable%tTableData)) then
-          iMemoryInBytes = sizeof(pCurrentTable) + sizeof(pCurrentTable%tTableData)
-          write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
-            pCurrentTable%sSeriesName, &
-            pCurrentTable%tStartDate%prettyDate(), &
-            pCurrentTable%tEndDate%prettyDate(), &
-            TABLE_TYPE(pCurrentTable%iTableType)
-
-        else
-          write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
-            pCurrentTable%sSeriesName, '***', '***', '***'
-
-        endif
-
-        ! recurse through list until we come to the end of the line
-        if(associated(pCurrentTable%pNext) ) then
-          pCurrentTable => pCurrentTable%pNext
-          cycle
-        else
-          exit
-        endif
-
-      end do
+      call this%summarizeTable(pCurrent)
+    else
+      write(LU_STD_OUT,fmt="(/,a,/)") '     ===> No TABLE objects currently in memory <==='
     endif
+
+!
+!
+!     if(.not. associated(this%pTable_Head)) then
+!       write(LU_STD_OUT,fmt="(/,a,/)") '     ===> No TABLE objects currently in memory <==='
+!
+!     else
+!
+!
+!       write(LU_STD_OUT, &
+!         fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
+!
+!
+!       pCurrentTable => this%pTable_Head
+!
+!       do
+!
+!         if(allocated(pCurrentTable%tTableData)) then
+!           iMemoryInBytes = sizeof(pCurrentTable) + sizeof(pCurrentTable%tTableData)
+!           write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
+!             pCurrentTable%sSeriesName, &
+!             pCurrentTable%tStartDate%prettyDate(), &
+!             pCurrentTable%tEndDate%prettyDate(), &
+!             TABLE_TYPE(pCurrentTable%iTableType)
+!
+!         else
+!           write(LU_STD_OUT,fmt="(a18,a10,'-',a10, t47, a)") &
+!             pCurrentTable%sSeriesName, '***', '***', '***'
+!
+!         endif
+!
+!         ! recurse through list until we come to the end of the line
+!         if(associated(pCurrentTable%pNext) ) then
+!           pCurrentTable => pCurrentTable%pNext
+!           cycle
+!         else
+!           exit
+!         endif
+!
+!       end do
+!     endif
 
 
     write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE COMPARISON OBJECTS CURRENTLY IN MEMORY ***'
@@ -1161,8 +1615,8 @@ contains
 
       do i=1,iCount
 
-        pObservedSeries => this%getTS(this%tTSComparison(i)%sObservedSeries)
-        pModeledSeries => this%getTS(this%tTSComparison(i)%sModeledSeries)
+        pObservedSeries => this%getSeries(this%tTSComparison(i)%sObservedSeries)
+        pModeledSeries => this%getSeries(this%tTSComparison(i)%sModeledSeries)
         rSSE = 0.
 
         do j=1,size(pObservedSeries%tData%rValue)
@@ -1253,7 +1707,7 @@ contains
     integer (kind=T_INT) :: i
     integer (kind=T_INT) :: iMemoryInBytes
 
-    pTS => this%getTS(sSeriesName)
+    pTS => this%getSeries(sSeriesName)
 
     write(LU_STD_OUT,fmt="(/,a,/)") trim(pTS%sDescription)
 
@@ -1303,8 +1757,8 @@ contains
       LU = LU_STD_OUT
     endif
 
-    tTSComparison => this%getTSComparison(sObservedSeries, sModeledSeries)
-    pObservedSeries => this%getTS(sObservedSeries)
+    tTSComparison => this%getSeriesComparison(sObservedSeries, sModeledSeries)
+    pObservedSeries => this%getSeries(sObservedSeries)
 
     sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,g16.8,3x,g16.8,3x,a)"
 
@@ -1324,18 +1778,18 @@ contains
 
 !------------------------------------------------------------------------------
 
-  subroutine list_output_ts_sub(this, sSeriesName, sDateFormat, iLU)
+  subroutine list_output_ts_sub(this, sSeriesName, iLU)
 
     class(TIME_SERIES_COLLECTION) :: this
     character(len=*), intent(in) :: sSeriesName
-    character(len=*), intent(in), optional :: sDateFormat
+!    character(len=*), intent(in), optional :: sDateFormat
     integer (kind=T_INT), intent(in), optional :: iLU
 
     ! [ LOCALS ]
     type(T_TIME_SERIES), pointer :: pTS
     integer (kind=T_INT) :: i
     integer (kind=T_INT) :: LU
-    character(len=20) :: sDateFmt
+!    character(len=20) :: sDateFmt
 
     if(present(iLU)) then
       LU = iLU
@@ -1343,17 +1797,17 @@ contains
       LU = LU_STD_OUT
     endif
 
-    if(present(sDateFormat)) then
-      sDateFmt = trim(sDateFormat)
-    else
-      sDateFmt = "MM/DD/YYYY"
-    endif
+!    if(present(sDateFormat)) then
+!      sDateFmt = trim(sDateFormat)
+!    else
+!      sDateFmt = "MM/DD/YYYY"
+!    endif
 
-    pTS => this%getTS(sSeriesName)
+    pTS => this%getSeries(sSeriesName)
 
     ! now that we have a pointer to a specific time series, call the
     ! type-bound method for that time series to do the actual output
-    call pTS%list(sDateFmt, LU)
+    call pTS%list(LU)
 
   end subroutine list_output_ts_sub
 
@@ -1446,7 +1900,7 @@ contains
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTS, pTimeBaseTS
     type (T_TIME_SERIES), pointer :: pNewSeries
-    type (T_TIME_SERIES), allocatable, target :: pTempSeries
+!    type (T_TIME_SERIES), allocatable, target :: pTempSeries
     integer (kind=T_INT) :: iStat
 
     real (kind=T_SGL), dimension(:), allocatable :: rX1, rX2, rY1, rY2
@@ -1467,8 +1921,8 @@ contains
    endif
 
     ! get pointers to the two series involved
-    pTS => this%getTS(sSeriesname)
-    pTimeBaseTS => this%getTS(sTimeBaseName)
+    pTS => this%getSeries(sSeriesname)
+    pTimeBaseTS => this%getSeries(sTimeBaseName)
 
     ! perform sanity checks on date boundaries
     call Assert(pTS%tStartDate <= pTimeBaseTS%tStartDate, &
@@ -1480,16 +1934,24 @@ contains
        //trim(sTimeBaseName)//") used to define the new time base", &
        trim(__FILE__), __LINE__)
 
-    allocate(pTempSeries, stat=iStat)
+!    allocate(pTempSeries, stat=iStat)
+!    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+!      trim(__FILE__), __LINE__)
+!
+!    allocate(pTempSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
+!    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+!      trim(__FILE__), __LINE__)
+
+    allocate(pNewSeries, stat=iStat)
     call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
-    allocate(pTempSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
+    allocate(pNewSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
     call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
-    pTempSeries%sSeriesname = sNewName
-    pTempSeries%sDescription = "Data from series "//trim(pTS%sSeriesName)//", " &
+    pNewSeries%sSeriesname = sNewName
+    pNewSeries%sDescription = "Data from series "//trim(pTS%sSeriesName)//", " &
       //"interpolated to the datetimes found in series "//trim(pTimeBaseTS%sSeriesName)
 
     allocate(rX1(size(pTS%tData)),stat=iStat)
@@ -1524,14 +1986,14 @@ contains
     call interp_1d( rX1, rY1, rX2, rY2)
 
     ! copy datetime values from the timebase series to the new series
-    pTempSeries%tData%tDT = pTimeBaseTS%tData%tDT
+    pNewSeries%tData%tDT = pTimeBaseTS%tData%tDT
     ! copy the interpolated values to the new series
-    pTempSeries%tData%rValue = rY2
-    call pTempSeries%findDateMinAndMax()
-    pNewSeries => pTempSeries
+    pNewSeries%tData%rValue = rY2
+    call pNewSeries%findDateMinAndMax()
+
     ! add new series to collection of series
 
-    call this%add(pNewSeries)
+    call this%insert(pNewSeries=pNewSeries)
     deallocate(rX1, rY1, rX2, rY2)
     nullify(pTS)
     nullify(pTimeBaseTS)
@@ -1555,8 +2017,8 @@ contains
     lBool = lTRUE
 
     ! get pointers to the two series involved
-    pTS1 => this%getTS(sSeriesname1)
-    pTS2 => this%getTS(sSeriesName2)
+    pTS1 => this%getSeries(sSeriesname1)
+    pTS2 => this%getSeries(sSeriesName2)
 
     iCount1 = size(pTS1%tData)
     iCount2 = size(pTS2%tData)
@@ -1620,8 +2082,8 @@ contains
       else  ! timebases for the two series are identical; proceed
 
         ! get pointers to the two series involved
-        pObservedSeries => this%getTS(sObservedSeries)
-        pModeledSeries => this%getTS(sModeledSeries)
+        pObservedSeries => this%getSeries(sObservedSeries)
+        pModeledSeries => this%getSeries(sModeledSeries)
 
         iCountObserved = size(pObservedSeries%tData)
         iCountModeled = size(pModeledSeries%tData)
@@ -1895,8 +2357,8 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
 !    print *, "|"//sVarTxt(i)//"|"
     if(isElement(sVarTxt(i), this%pTS%sSeriesName)) then
       iNumSeries = iNumSeries + 1
-      pTS => this%getTS( sVarTxt(i) )
-      call TSCOL%add( pTS )
+      pTS => this%getSeries( sVarTxt(i) )
+      call TSCOL%insert( pNewSeries=pTS )
       lInclude(i) = lTRUE
       if(iNumSeries>1) then
         lConsistentTimebase = this%datesEqual(sPreviousSeriesName, sVarTxt(i) )
@@ -1969,7 +2431,5 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
   call TSCOL%clear()
 
 end function calc_values_from_equation_fn
-
-!------------------------------------------------------------------------------
 
 end module tsp_collections

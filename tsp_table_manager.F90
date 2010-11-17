@@ -357,7 +357,7 @@ contains
     ! and for the overall time series. Once this call is made, we simply have to
     ! pull out the statistics of interest.
     pStats => create_stats_object(rTempValue, tTempDateTime%iMonth, &
-                   tTempDateTime%iYear, tTempDateTime%iJulianDay)
+                   tTempDateTime%iYear, tTempDateTime%iJulianDay, this%sSeriesName)
 
     ! get a pointer to the MA block of streamflow statistics
     MA => compute_hyd_indices_MA(pStats)

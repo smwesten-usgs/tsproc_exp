@@ -616,7 +616,7 @@ subroutine pest_files(pBlock, TS)
     call echolog("")
     call echolog('     Reading parameter group file '//trim(pPARAMETER_GROUP_FILE(1)) )
 
-       open(newunit=iunit,file=trim(pPARAMETER_GROUP_FILE(1)),status='old',iostat=ierr)
+       open(unit=newunit(iunit),file=trim(pPARAMETER_GROUP_FILE(1)),status='old',iostat=ierr)
 
        call assert(ierr==0,"cannot open parameter group file "//trim(pPARAMETER_GROUP_FILE(1)), &
          trim(__FILE__), __LINE__)
@@ -789,7 +789,7 @@ subroutine pest_files(pBlock, TS)
 !          go to 9800
 !        end if
 
-       open(newunit=iunit,file=trim(pPARAMETER_DATA_FILE(1)),status='old',iostat=ierr)
+       open(unit=newunit(iunit),file=trim(pPARAMETER_DATA_FILE(1)),status='old',iostat=ierr)
        call assert(ierr==0,"cannot open parameter data file "//quote(pPARAMETER_DATA_FILE(1)), &
          trim(__FILE__), __LINE__)
 !
@@ -1004,7 +1004,7 @@ subroutine pest_files(pBlock, TS)
    !           call addquote(tempfile(itempfile),sString)
          call echolog("")
          call echolog("     Reading template file "//quote(pTEMPLATE_FILE(itempfile)) )
-         open(newunit=tempunit,file=trim(pTEMPLATE_FILE(itempfile)),status='old',iostat=ierr)
+         open(unit=newunit(tempunit),file=trim(pTEMPLATE_FILE(itempfile)),status='old',iostat=ierr)
          call assert(ierr==0,"cannot open template file "//quote(pTEMPLATE_FILE(itempfile)), &
                  trim(__FILE__), __LINE__)
 
@@ -1566,7 +1566,7 @@ subroutine pest_files(pBlock, TS)
 !          end if
 !        end if
 
-         open(newunit=LU_PEST_CONTROL_FILE,file=trim(pNEW_PEST_CONTROL_FILE(1)),status='replace',iostat=ierr)
+         open(unit=newunit(LU_PEST_CONTROL_FILE),file=trim(pNEW_PEST_CONTROL_FILE(1)),status='replace',iostat=ierr)
          call assert(ierr==0,"cannot open PEST control file "//quote(pNEW_PEST_CONTROL_FILE(1)), &
                  trim(__FILE__), __LINE__)
 
@@ -1744,14 +1744,14 @@ subroutine pest_files(pBlock, TS)
 !            if(dval < weightmin)dval=weightmin
 !            if(dval > weightmax)dval=weightmax
 !            write(LU_PEST_CONTROL_FILE,1900) trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
-! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
+! 1900       format(a,t22,1pg14.7,t40,1pg14.6,2x,a)
 !          end do
 !        end do
 
     do i=1,iNumSeries
 
-      pTS_Observed => TS%getTS(TS%tTSComparison(i)%sObservedSeries)
-      pTS_Modeled => TS%getTS(TS%tTSComparison(i)%sModeledSeries)
+      pTS_Observed => TS%getSeries(TS%tTSComparison(i)%sObservedSeries)
+      pTS_Modeled => TS%getSeries(TS%tTSComparison(i)%sModeledSeries)
 
       call Assert(pTS_Modeled%iListOutputPosition > 0, &
         "The modeled time series "//quote(TS%tTSComparison(i)%sModeledSeries) &
@@ -1760,14 +1760,14 @@ subroutine pest_files(pBlock, TS)
 
       do j=1,size(pTS_Observed%tData)
 
-        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,g14.7,t40,g12.6,2x,a)") &
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,g14.7,t40,g14.6,2x,a)") &
           trim(pTS_Observed%sSeriesName)//"_"//trim(asChar(j)),pTS_Observed%tData(j)%rValue, &
           TS%tTSComparison(i)%rWeightValue(j),trim(pTS_Observed%sSeriesName)
 
       enddo
 
 !              trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
-! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
+! 1900       format(a,t22,1pg14.7,t40,1pg14.6,2x,a)
 
     enddo
 
@@ -1777,14 +1777,14 @@ subroutine pest_files(pBlock, TS)
 
       if( pTable%iTableType == iSTABLE ) then
         do j=9,size(pTable%tTableData)
-        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g14.6,2x,a)") &
           trim(pTable%sSeriesName)//"_"//trim(asChar(j)),trim(pTable%tTableData(j)%sValue(1)), &
           TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
         enddo
 
       elseif( pTable%iTableType == iETABLE ) then
         do j=1,size(pTable%tTableData)
-        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g14.6,2x,a)") &
           trim(pTable%sSeriesName)//"_"//trim(asChar(j)), &
           trim(pTable%tTableData(j)%sValue(3)), &
           TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
@@ -1792,21 +1792,21 @@ subroutine pest_files(pBlock, TS)
 
       elseif( pTable%iTableType == iVTABLE ) then
         do j=1,size(pTable%tTableData)
-        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g14.6,2x,a)") &
           trim(pTable%sSeriesName)//"_"//trim(asChar(j)),trim(pTable%tTableData(j)%sValue(1)), &
           TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
         enddo
 
       elseif( pTable%iTableType == iITABLE ) then
         do j=1,size(pTable%tTableData)
-        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g12.6,2x,a)") &
+        write(LU_PEST_CONTROL_FILE,fmt="(a,t22,a,t40,g14.6,2x,a)") &
           trim(pTable%sSeriesName)//"_"//trim(asChar(j)),trim(pTable%tTableData(j)%sValue(1)), &
           TS%tTableComparison(i)%rWeightValue(j),trim(pTable%sSeriesName)
         enddo
 
       endif
 !              trim(aname),series_g(io)%val(j),dval,trim(series_g(im)%name)
-! 1900       format(a,t22,1pg14.7,t40,1pg12.6,2x,a)
+! 1900       format(a,t22,1pg14.7,t40,1pg14.6,2x,a)
 
     enddo
 

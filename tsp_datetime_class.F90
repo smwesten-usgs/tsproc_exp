@@ -19,31 +19,35 @@ module tsp_datetime_class
 
   contains
 
-    procedure :: calc_julian_day_sub
-    procedure :: populate_julian_day_sub
-    generic, public :: calcJulianDay => calc_julian_day_sub, &
-                                           populate_julian_day_sub
+    ! it seems that gfortran is the only compiler (as of November, 2010) that
+    ! supports the use of the generic statement within type-bound procedures
+    ! sigh. Must remove all references to generic so that compilation is
+    ! possible with ifort and NAG compilers.
+
+    procedure, public  :: calcJulianDay => calc_julian_day_sub
+!    procedure, public :: populateJulianDay => populate_julian_day_sub
+!    generic, public :: calcJulianDay => calc_julian_day_sub, &
+!                                           populate_julian_day_sub
     procedure :: calcGregorianDate => calc_gregorian_date_sub
     procedure, public :: calcWaterYear => calc_water_year_sub
     procedure, public :: parseDate => parse_text_to_date_sub
     procedure, public :: parseTime => parse_text_to_time_sub
-    procedure :: is_date_greater_than
 
     procedure, public :: setTimeFormat => set_time_format_indices
     procedure, public :: setDateFormat => set_Date_format_indices
 
     ! define operators that will work with datetime objects
-    generic :: operator(>) => is_date_greater_than
-    procedure :: is_date_less_than
-    generic :: operator(<) => is_date_less_than
-    procedure :: is_date_GT_or_equal_to
-    generic :: operator(>=) => is_date_GT_or_equal_to
-    procedure :: is_date_LT_or_equal_to
-    generic :: operator(<=) => is_date_LT_or_equal_to
-    procedure :: is_date_equal_to
-    generic :: operator(==) => is_date_equal_to
-    procedure :: date_subtract => date_minus_date_fn
-    generic :: operator(-) => date_subtract
+!    generic :: operator(>) => is_date_greater_than
+!    procedure :: is_date_less_than
+!    generic :: operator(<) => is_date_less_than
+!    procedure :: is_date_GT_or_equal_to
+!    generic :: operator(>=) => is_date_GT_or_equal_to
+!    procedure :: is_date_LT_or_equal_to
+!    generic :: operator(<=) => is_date_LT_or_equal_to
+!    procedure :: is_date_equal_to
+!    generic :: operator(==) => is_date_equal_to
+!    procedure :: date_subtract => date_minus_date_fn
+!    generic :: operator(-) => date_subtract
     procedure :: increment => date_plus_real_fn
     procedure :: decrement => date_minus_real_fn
 
@@ -56,6 +60,29 @@ module tsp_datetime_class
 
   end type T_DATETIME
 
+  interface operator(>)
+    module procedure is_date_greater_than
+  end interface
+
+  interface operator(<)
+    module procedure is_date_less_than
+  end interface
+
+  interface operator(>=)
+    module procedure is_date_GT_or_equal_to
+  end interface
+
+  interface operator(<=)
+    module procedure is_date_LT_or_equal_to
+  end interface
+
+  interface operator(==)
+    module procedure is_date_equal_to
+  end interface
+
+  interface operator(-)
+    module procedure date_minus_date_fn
+  end interface
 
   type T_DATERANGE
 
@@ -64,8 +91,10 @@ module tsp_datetime_class
 
   contains
 
-    procedure, public :: new_daterange_fm_text_sub, new_daterange_fm_datetime_sub
-    generic :: new => new_daterange_fm_text_sub, new_daterange_fm_datetime_sub
+!    procedure, public :: new_daterange_fm_text_sub, new_daterange_fm_datetime_sub
+!    generic :: new => new_daterange_fm_text_sub, new_daterange_fm_datetime_sub
+    procedure, public :: newFmText => new_daterange_fm_text_sub
+    procedure, public :: newFmDT => new_daterange_fm_datetime_sub
 
   end type T_DATERANGE
 
@@ -96,8 +125,10 @@ module tsp_datetime_class
   character (len=14), public  :: sDEFAULT_DATE_FORMAT = "MM/DD/YYYY"
   integer (kind=T_INT), private :: iScanMM1 = 1
   integer (kind=T_INT), private :: iScanMM2 = 2
+  integer (kind=T_INT), private :: iScanDelim1 = 3
   integer (kind=T_INT), private :: iScanDD1 = 4
   integer (kind=T_INT), private :: iScanDD2 = 5
+  integer (kind=T_INT), private :: iScanDelim2 = 6
   integer (kind=T_INT), private :: iScanYYYY1 = 7
   integer (kind=T_INT), private :: iScanYYYY2 = 10
 
@@ -139,12 +170,14 @@ subroutine set_date_format_indices(this, sDateFormat)
 
   ! [ LOCALS ]
   character (len=14) :: sDateFmt
+  character (len=6), parameter :: DELIMITERS = "/-_\. "
 
   if(present(sDateFormat) ) then
     sDateFmt = sDateFormat
     sDATE_FORMAT = sDateFormat
   else
     sDateFmt = sDEFAULT_DATE_FORMAT
+    sDATE_FORMAT = sDEFAULT_DATE_FORMAT
   endif
 
   iScanMM1 = scan(string=sDateFmt,set="M")
@@ -153,12 +186,18 @@ subroutine set_date_format_indices(this, sDateFormat)
   iScanDD2 = scan(string=sDateFmt,set="D", back=lTRUE )
   iScanYYYY1 = scan(string=sDateFmt,set="Y")
   iScanYYYY2 = scan(string=sDateFmt,set="Y", back=lTRUE )
+  iScanDelim1 = scan(string=trim(sDateFmt), set=DELIMITERS)
+  iScanDelim2 = scan(string=trim(sDateFmt), set=DELIMITERS, back=lTRUE)
 
   call Assert(iScanMM1 > 0 .and. iScanMM2 > 0 &
-        .and. iScanDD1 > 0 .and. iScanDD2 > 0 &
-        .and. iScanYYYY1 > 0 .and. iScanYYYY2 > 0, &
-        "Failed to properly parse the date format string "//quote(sDateFormat), &
-        trim(__FILE__), __LINE__)
+    .and. iScanDD1 > 0 .and. iScanDD2 > 0 &
+    .and. iScanYYYY1 > 0 .and. iScanYYYY2 > 0, &
+    "Failed to properly parse the date format string "//quote(sDateFormat), &
+    trim(__FILE__), __LINE__)
+    ! perhaps there are no delimiters? if not, these values CAN be zero
+!  call assert(iScanDelim1 > 0 .and. iScanDelim2 > 0, &
+!    "Failed to properly parse the delimiters in the date format string "//quote(sDateFormat), &
+!    trim(__FILE__), __LINE__)
 
 end subroutine set_date_format_indices
 
@@ -322,53 +361,63 @@ end subroutine calc_water_year_sub
 
 !--------------------------------------------------------------------------
 
-subroutine populate_julian_day_sub(this, iMonth, iDay, iYear, &
-                                iHour, iMinute, iSecond)
-
-  class (T_DATETIME) :: this
-  integer (kind=T_INT), intent(in) :: iMonth
-  integer (kind=T_INT), intent(in) :: iDay
-  integer (kind=T_INT), intent(in) :: iYear
-  integer (kind=T_INT), intent(in) :: iHour
-  integer (kind=T_INT), intent(in) :: iMinute
-  integer (kind=T_INT), intent(in) :: iSecond
-
-  ! [LOCALS]
-!  integer (kind=T_INT) :: iJulianDay
-!  real (kind=T_DBL) :: rFractionOfDay
-
-  this%iMonth = iMonth
-  this%iDay = iDay
-  this%iYear = iYear
-  this%iHour = iHour
-  this%iMinute = iMinute
-  this%iSecond = iSecond
-
-!  this%iJulianDay = julian_day( this%iYear, this%iMonth, this%iDay)
-  this%iJulianDay = julian_day( int(this%iYear, kind=T_INT), &
-                                int(this%iMonth, kind=T_INT), &
-                                int(this%iDay, kind=T_INT))
-
-  this%rFractionOfDay = real(this%iHour, kind=T_DBL) / 24_T_DBL + &
-                   real(this%iMinute, kind=T_DBL) / 1440_T_DBL + &
-                   real(this%iSecond, kind=T_DBL) / 86400_T_DBL
-
-!  this%rJulianDay = real(iJulianDay, kind=T_DBL) + rFractionOfDay !&
-!                                     - 2400000.5_T_DBL
-
-  ! 2400000.5 is subtracted to yield one definition of a "MODIFIED JUILAN DAY"
-
-end subroutine populate_julian_day_sub
+! subroutine populate_julian_day_sub(this, iMonth, iDay, iYear, &
+!                                 iHour, iMinute, iSecond)
+!
+!   class (T_DATETIME) :: this
+!   integer (kind=T_INT), intent(in) :: iMonth
+!   integer (kind=T_INT), intent(in) :: iDay
+!   integer (kind=T_INT), intent(in) :: iYear
+!   integer (kind=T_INT), intent(in) :: iHour
+!   integer (kind=T_INT), intent(in) :: iMinute
+!   integer (kind=T_INT), intent(in) :: iSecond
+!
+!   ! [LOCALS]
+! !  integer (kind=T_INT) :: iJulianDay
+! !  real (kind=T_DBL) :: rFractionOfDay
+!
+!   this%iMonth = iMonth
+!   this%iDay = iDay
+!   this%iYear = iYear
+!   this%iHour = iHour
+!   this%iMinute = iMinute
+!   this%iSecond = iSecond
+!
+! !  this%iJulianDay = julian_day( this%iYear, this%iMonth, this%iDay)
+!   this%iJulianDay = julian_day( int(this%iYear, kind=T_INT), &
+!                                 int(this%iMonth, kind=T_INT), &
+!                                 int(this%iDay, kind=T_INT))
+!
+!   this%rFractionOfDay = real(this%iHour, kind=T_DBL) / 24_T_DBL + &
+!                    real(this%iMinute, kind=T_DBL) / 1440_T_DBL + &
+!                    real(this%iSecond, kind=T_DBL) / 86400_T_DBL
+!
+! !  this%rJulianDay = real(iJulianDay, kind=T_DBL) + rFractionOfDay !&
+! !                                     - 2400000.5_T_DBL
+!
+!   ! 2400000.5 is subtracted to yield one definition of a "MODIFIED JUILAN DAY"
+!
+! end subroutine populate_julian_day_sub
 
 !--------------------------------------------------------------------------
 
-subroutine calc_julian_day_sub(this)
+subroutine calc_julian_day_sub(this, iMonth, iDay, iYear, &
+                                iHour, iMinute, iSecond)
 
   class (T_DATETIME) :: this
+  integer (kind=T_INT), intent(in), optional :: iMonth
+  integer (kind=T_INT), intent(in), optional :: iDay
+  integer (kind=T_INT), intent(in), optional :: iYear
+  integer (kind=T_INT), intent(in), optional :: iHour
+  integer (kind=T_INT), intent(in), optional :: iMinute
+  integer (kind=T_INT), intent(in), optional :: iSecond
 
-  ! [LOCALS]
-!  integer (kind=T_INT) :: iJulianDay
-!  real (kind=T_DBL) :: rFractionOfDay
+  if(present(iMonth) ) this%iMonth = iMonth
+  if(present(iDay) ) this%iDay = iDay
+  if(present(iYear) ) this%iYear = iYear
+  if(present(iHour) ) this%iHour = iHour
+  if(present(iMinute) ) this%iMinute = iMinute
+  if(present(iSecond) ) this%iSecond = iSecond
 
   this%iJulianDay = julian_day( int(this%iYear, kind=T_INT), &
                                 int(this%iMonth, kind=T_INT), &
@@ -381,6 +430,7 @@ subroutine calc_julian_day_sub(this)
 
 end subroutine calc_julian_day_sub
 
+!--------------------------------------------------------------------------
 
 subroutine calc_gregorian_date_sub(this)
 
@@ -728,7 +778,23 @@ function write_list_date_fn(this)                     result(sDateText)
   class(T_DATETIME) :: this
   character (len=10) :: sDateText
 
-  sDateText = this%listdatetime(sDateFormat="MM/DD/YYYY", lDateOnly = lTRUE)
+  ! [ LOCALS ]
+  integer (kind=T_INT), dimension(5) :: iStat
+!  sDateText = this%listdatetime()
+
+  write(sDateText(iScanMM1:iScanMM2),fmt="(i2.2)", iostat=iStat(1)) this%iMonth
+  write(sDateText(iScanDD1:iScanDD2),fmt="(i2.2)", iostat=iStat(2)) this%iDay
+  write(sDateText(iScanYYYY1:iScanYYYY2),fmt="(i4.4)",iostat=iStat(3)) this%iYear
+  if(iScanDelim1 > 0) write(sDateText(iScanDelim1:iScanDelim1), &
+     fmt="(a1)",iostat=iStat(4)) &
+     sDATE_FORMAT(iScanDelim1:iScanDelim1)
+  if(iScanDelim2 > 0) write(sDateText(iScanDelim2:iScanDelim2), &
+     fmt="(a1)",iostat=iStat(5)) &
+     sDATE_FORMAT(iScanDelim2:iScanDelim2)
+
+  call Assert(all(iStat==0),"Problem parsing the date format '"// &
+     trim(sDATE_FORMAT)//"' for output", &
+    trim(__FILE__), __LINE__)
 
 end function write_list_date_fn
 
@@ -745,71 +811,71 @@ end function write_list_time_fn
 
 !------------------------------------------------------------------------------
 
-function write_list_datetime_fn(this, sDateFormat, lDateOnly)    result(sDatetimeText)
+function write_list_datetime_fn(this)    result(sDatetimeText)
 
   class(T_DATETIME) :: this
-  character(len=*), optional :: sDateFormat
-  logical (kind=T_LOGICAL), optional :: lDateOnly
-  character (len=25) :: sDatetimeText
+!  character(len=*), optional :: sDateFormat
+!  logical (kind=T_LOGICAL), optional :: lDateOnly
+  character (len=19) :: sDatetimeText
 
   ! [ LOCALS ]
-  character(len=25) sDateFmt
-  integer (kind=T_INT) :: iScanMM1, iScanMM2
-  integer (kind=T_INT) :: iScanDD1, iScanDD2
-  integer (kind=T_INT) :: iScanYYYY1, iScanYYYY2
-  integer (kind=T_INT) :: iScanDelim1, iScanDelim2
+!  character(len=25) sDateFmt
+!  integer (kind=T_INT) :: iScanMM1, iScanMM2
+!  integer (kind=T_INT) :: iScanDD1, iScanDD2
+!  integer (kind=T_INT) :: iScanYYYY1, iScanYYYY2
+!  integer (kind=T_INT) :: iScanDelim1, iScanDelim2
   character (len=32) :: sBuf
-  character (len=6), parameter :: DELIMITERS = "/-_\. "
+!  character (len=6), parameter :: DELIMITERS = "/-_\. "
   integer (kind=T_INT), dimension(5) :: iStat
-  logical (kind=T_LOGICAL) lListTime
+!  logical (kind=T_LOGICAL) lListTime
 
-  sDateTimeText = repeat(" ",25)
+  sDateTimeText = ""
 
-  if(present(sDateFormat)) then
-    sDateFmt = uppercase(trim(adjustl(sDateFormat)))
-  else
-    sDateFmt = "MM/DD/YYYY"
-  endif
+!  if(present(sDateFormat)) then
+!    sDateFmt = uppercase(trim(adjustl(sDateFormat)))
+!  else
+!    sDateFmt = "MM/DD/YYYY"
+!  endif
 
-  if(present(lDateOnly)) then
-    lListTime = .not. lDateOnly
-  else
-    lListTime = lTRUE
-  endif
+!  if(present(lDateOnly)) then
+!    lListTime = .not. lDateOnly
+!  else
+!    lListTime = lTRUE
+!  endif
 
-  iScanMM1 = scan(string=sDateFmt,set="M")
-  iScanMM2 = scan(string=sDateFmt,set="M", back=lTRUE )
+!  iScanMM1 = scan(string=sDateFmt,set="M")
+!  iScanMM2 = scan(string=sDateFmt,set="M", back=lTRUE )
 
-  iScanDD1 = scan(string=sDateFmt,set="D")
-  iScanDD2 = scan(string=sDateFmt,set="D", back=lTRUE )
+!  iScanDD1 = scan(string=sDateFmt,set="D")
+!  iScanDD2 = scan(string=sDateFmt,set="D", back=lTRUE )
 
-  iScanYYYY1 = scan(string=sDateFmt,set="Y")
-  iScanYYYY2 = scan(string=sDateFmt,set="Y", back=lTRUE )
+!  iScanYYYY1 = scan(string=sDateFmt,set="Y")
+!  iScanYYYY2 = scan(string=sDateFmt,set="Y", back=lTRUE )
 
-  iScanDelim1 = scan(string=trim(sDateFmt), set=DELIMITERS)
-  iScanDelim2 = scan(string=trim(sDateFmt), set=DELIMITERS, back=lTRUE)
+!  iScanDelim1 = scan(string=trim(sDateFmt), set=DELIMITERS)
+!  iScanDelim2 = scan(string=trim(sDateFmt), set=DELIMITERS, back=lTRUE)
 
   write(sDateTimeText(iScanMM1:iScanMM2),fmt="(i2.2)", iostat=iStat(1)) this%iMonth
   write(sDateTimeText(iScanDD1:iScanDD2),fmt="(i2.2)", iostat=iStat(2)) this%iDay
   write(sDateTimeText(iScanYYYY1:iScanYYYY2),fmt="(i4.4)",iostat=iStat(3)) this%iYear
   if(iScanDelim1 > 0) write(sDateTimeText(iScanDelim1:iScanDelim1), &
      fmt="(a1)",iostat=iStat(4)) &
-     sDateFmt(iScanDelim1:iScanDelim1)
+     sDATE_FORMAT(iScanDelim1:iScanDelim1)
   if(iScanDelim2 > 0) write(sDateTimeText(iScanDelim2:iScanDelim2), &
      fmt="(a1)",iostat=iStat(5)) &
-     sDateFmt(iScanDelim2:iScanDelim2)
+     sDATE_FORMAT(iScanDelim2:iScanDelim2)
 
   call Assert(all(iStat==0),"Problem parsing the date format '"// &
-     trim(sDateFmt)//"' for output", &
+     trim(sDATE_FORMAT)//"' for output", &
     trim(__FILE__), __LINE__)
 
   write(sBuf,fmt="(1x,i2.2,':',i2.2':',i2.2)") this%iHour, this%iMinute, this%iSecond
 
-  if(lListTime) then
+!  if(lListTime) then
     sDateTimeText = trim(sDateTimeText) // trim(sBuf)
-  else
-    sDateTimeText = trim(sDateTimeText)
-  endif
+!  else
+!    sDateTimeText = trim(sDateTimeText)
+!  endif
 
 end function write_list_datetime_fn
 
@@ -937,7 +1003,7 @@ function read_dates_file(sFilename)                           result(pDateRange)
 
   sSet = cTAB//" "   ! inform 'Chomp' that tabs *or* spaces are the delimiters
 
-  open(newunit=LU_DATES, file=trim(sFilename),status='OLD',iostat=iStat)
+  open(unit=newunit(LU_DATES), file=trim(sFilename),status='OLD',iostat=iStat)
   call Assert(iStat == 0, "Problem opening dates file "//trim(sFilename), &
      trim(__FILE__), __LINE__)
 
@@ -970,7 +1036,7 @@ function read_dates_file(sFilename)                           result(pDateRange)
 
     call Assert(i <= iSize, "Attempt to access pointer beyond allocated range", &
       trim(__FILE__), __LINE__)
-    call pDateRange(i)%new(sStartDate, sStartTime, sEndDate, sEndTime)
+    call pDateRange(i)%newFmText(sStartDate, sStartTime, sEndDate, sEndTime)
 
   enddo
 
@@ -1027,7 +1093,7 @@ function make_monthly_dates_list_fn(tStartDate, tEndDate)       result(pDateRang
       iStartDay = iDay
       iStartYear = iYear
 
-      call pDateRange(iNumMonths)%new(tStartPeriod, tEndPeriod)
+      call pDateRange(iNumMonths)%newFmDT(tStartPeriod, tEndPeriod)
     endif
     iEndMonth = iMonth; iEndYear = iYear; iEndDay = iDay
   enddo
@@ -1037,7 +1103,7 @@ function make_monthly_dates_list_fn(tStartDate, tEndDate)       result(pDateRang
     iNumMonths = iNumMonths + 1
     call tStartPeriod%calcJulianDay(iStartMonth, iStartDay,iStartYear, 0, 0, 0)
     call tEndPeriod%calcJulianDay(iEndMonth, iEndDay,iEndYear, 0, 0, 0)
-    call pDateRange(iNumMonths)%new(tStartPeriod, tEndPeriod)
+    call pDateRange(iNumMonths)%newFmDT(tStartPeriod, tEndPeriod)
   endif
 
 end function make_monthly_dates_list_fn
@@ -1091,7 +1157,7 @@ function make_annual_dates_list_fn(tStartDate, tEndDate)       result(pDateRange
       iStartDay = iDay
       iStartYear = iYear
 
-      call pDateRange(iNumYears)%new(tStartPeriod, tEndPeriod)
+      call pDateRange(iNumYears)%newFmDT(tStartPeriod, tEndPeriod)
     endif
     iEndMonth = iMonth; iEndYear = iYear; iEndDay = iDay
   enddo
@@ -1101,7 +1167,7 @@ function make_annual_dates_list_fn(tStartDate, tEndDate)       result(pDateRange
     iNumYears = iNumYears + 1
     call tStartPeriod%calcJulianDay(iStartMonth, iStartDay,iStartYear, 0, 0, 0)
     call tEndPeriod%calcJulianDay(iEndMonth, iEndDay,iEndYear, 0, 0, 0)
-    call pDateRange(iNumYears)%new(tStartPeriod, tEndPeriod)
+    call pDateRange(iNumYears)%newFmDT(tStartPeriod, tEndPeriod)
   endif
 
 end function make_annual_dates_list_fn
