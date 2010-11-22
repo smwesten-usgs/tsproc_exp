@@ -527,6 +527,9 @@ contains
     ! allocate memory for TABLE object
     allocate(this%tTableData(iSize))
 
+    this%sDescription = "Exceedence table (E_TABLE) "//quote(this%sSeriesname) &
+      //" derived from series "//quote(pTS%sSeriesName)
+
     ! logic for next block translated from John Doherty's "time_duration" subroutine
 
     rDuration = rD_ZERO
@@ -634,6 +637,8 @@ contains
           "(7x,'Flow',7x,'Time delay (days)',4x,'Time below (days)',5x," &
             //"'Time below (fractional)')")
     endif
+
+
 
     deallocate( rDuration, rFractionOfTime)
     if(associated(pFLOW)) deallocate( pFLOW )
@@ -839,6 +844,8 @@ contains
     if(str_compare(sLOG,"NA")) sLOG = "no"
 
     this%iTableType = iSTABLE
+    this%sDescription = "Statistics table (S_TABLE) "//quote(this%sSeriesname) &
+      //" derived from series "//quote(pTS%sSeriesName)
 
     allocate(this%tTableData(iSize))
 

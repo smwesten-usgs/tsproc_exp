@@ -125,26 +125,15 @@ subroutine listseriesnames(sSeriesnames)
   ! [ LOCALS ]
   character (len=256) :: sFormatString
   integer (kind=T_INT) :: iCount, i
-  type (T_TIME_SERIES), pointer :: pCurrent
+  type (T_NODE), pointer :: pCurrent
 
   sSeriesnames = ""
 
-  if(associated(TS%pTS_Head)) then
+  if(associated(TS%pRoot)) then
 
-    pCurrent => TS%pTS_Head
+    pCurrent => TS%pRoot
 
-
-    do
-      if(.not. associated(pCurrent) ) exit
-
-      if(len_trim(sSeriesNames) == 0) then
-        sSeriesNames = trim(pCurrent%sSeriesName)
-      else
-        sSeriesNames = trim(sSeriesNames)//" "//trim(pCurrent%sSeriesName)
-      endif
-
-      pCurrent => pCurrent%pNext
-    enddo
+    call traverse_tree_sub(TS, pCurrent, sSeriesnames)
 
   else
 
@@ -153,6 +142,26 @@ subroutine listseriesnames(sSeriesnames)
   endif
 
   nullify(pCurrent)
+
+ contains
+
+   recursive subroutine traverse_tree_sub(TS, pCurrent, sSeriesnames)
+
+    class(TIME_SERIES_COLLECTION) :: TS
+    type (T_NODE), pointer        :: pCurrent
+    character(len=8192), intent(out) :: sSeriesnames
+
+    if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+       call traverse_tree_sub(TS, pCurrent%pLeft, sSeriesnames)
+    end  if
+
+    sSeriesnames = trim(sSeriesNames)//" "//trim(pCurrent%sNodeName)
+
+    if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+       call traverse_tree_sub(TS, pCurrent%pRight, sSeriesnames)
+    end  if
+
+  end subroutine traverse_tree_sub
 
 end subroutine listseriesnames
 
@@ -649,7 +658,6 @@ end subroutine listtablenames
     endif
 
     call TS%insert(pNewTable=pTable)
-    call TS%insert(pNewTable=pTable)
     nullify(pTempSeries)
 
   end subroutine hydrologic_indices
@@ -1038,7 +1046,6 @@ end subroutine listtablenames
     endif
 
     call TS%insert(pNewTable=pTable)
-    call TS%insert(pNewTable=pTable)
     nullify(pTempSeries)
 
   end subroutine exceedence_time
@@ -1047,6 +1054,7 @@ end subroutine listtablenames
 
   subroutine series_statistics(sSeriesname)
 
+    !f2py character*(*), intent(in), optional :: sSeriesName
     character(len=*), intent(in), optional :: sSeriesName
 
     ! [ LOCALS ]
@@ -1082,7 +1090,6 @@ end subroutine listtablenames
 
     endif
 
-    call TS%insert(pNewTable=pTable)
     call TS%insert(pNewTable=pTable)
     nullify(pTempSeries)
 
@@ -1316,6 +1323,10 @@ subroutine series_compare(sObservedSeries_, sModeledSeries_, sNewTableName_, &
         pNewTable%sSeriesName = trim(sObservedSeries)//"_CTBL"
       endif
 
+      pNewTable%sDescription = "Series comparison (C_TABLE) "//quote(pNewTable%sSeriesname) &
+        //" between observed series "//quote(sObservedSeries)//" and modeled series " &
+        //quote(sModeledSeries)
+
       ! let's just calculate all the comparison mesures
       allocate(iActiveOptions(iNUM_C_TABLE_STATS) )
       do i=1,iNUM_C_TABLE_STATS
@@ -1521,9 +1532,9 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
   allocate(pNewSeries_BF, stat=iStat)
   call assert(iStat==0,"Problem allocating memory for baseflow series", &
     trim(__FILE__), __LINE__)
-  allocate(pNewSeries_SF, stat=iStat)
-  call assert(iStat==0,"Problem allocating memory for surface flow series", &
-    trim(__FILE__), __LINE__)
+!  allocate(pNewSeries_SF, stat=iStat)
+!  call assert(iStat==0,"Problem allocating memory for surface flow series", &
+!    trim(__FILE__), __LINE__)
 
 
   if(present(sInputSeriesName)) iLen1 = len_trim(sInputSeriesName)
@@ -1597,7 +1608,7 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
       endif
 
       pNewSeries_BF%sSeriesName = trim(sSeriesName)//"_BF"
-      pNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
+!      pNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
 
     elseif(str_compare(pBlock%sBlockName, "USGS_HYSEP")) then
 
@@ -1610,10 +1621,10 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
       pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
       if(str_compare(pNEW_SERIES_NAME(1),"NA")) then
         pNewSeries_BF%sSeriesName = trim(sSeriesName)//"_BF"
-        pNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
+!        pNewSeries_SF%sSeriesName = trim(sSeriesName)//"_SF"
       else
         pNewSeries_BF%sSeriesName = trim(pNEW_SERIES_NAME(1))
-        pNewSeries_SF%sSeriesName = trim(pNEW_SERIES_NAME(1))//"_SF"
+!        pNewSeries_SF%sSeriesName = trim(pNEW_SERIES_NAME(1))//"_SF"
       endif
 
       ! get the values
@@ -1660,10 +1671,10 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     pTempSeries => TS%getSeries( sSeriesName )
     iCount = pTempSeries%selectByDate( tDATETIME_1, tDATETIME_2)
     allocate(pNewSeries_BF%tData(iCount))
-    allocate(pNewSeries_SF%tData(iCount))
+!    allocate(pNewSeries_SF%tData(iCount))
 
     pNewSeries_BF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
-    pNewSeries_SF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
+!    pNewSeries_SF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
 
     if(iInterval < 3 .or. iInterval > 11 .or. mod(iInterval,2) /=1) then
       call warn(lFALSE,"Interval must be in the set [3,5,7,9,11]. You entered " &
@@ -1692,15 +1703,19 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     end select
 
     ! at this point, pNewSeries_SF%tData%rValue holds the total mean daily streamflow
-    pNewSeries_SF%tData%rValue = pNewSeries_SF%tData%rValue - pNewSeries_BF%tData%rValue
+!    pNewSeries_SF%tData%rValue = pNewSeries_SF%tData%rValue - pNewSeries_BF%tData%rValue
 
     ! ensure that new series have the date range populated
     call pNewSeries_BF%findDateMinAndMax()
-    call pNewSeries_SF%findDateMinAndMax()
+!    call pNewSeries_SF%findDateMinAndMax()
+
+    pNewSeries_BF%sDescription = &
+      "USGS HYSEP (hydrograph seperation) derived from series "//quote(sSeriesName)
+
 
     ! add new series to TS collection
     call TS%insert(pNewSeries=pNewSeries_BF)
-    call TS%insert(pNewSeries=pNewSeries_SF)
+!    call TS%insert(pNewSeries=pNewSeries_SF)
 
     exit
   enddo
@@ -2072,35 +2087,35 @@ end subroutine datestampsequal
     endif
 
     call TS%insert(pNewTable=pTable)
-    call TS%insert(pNewTable=pTable)
     nullify(pTS)
 
   end subroutine volume_calculation
 
 !------------------------------------------------------------------------------
 
-  subroutine erase_entity(sSeriesname)
+  subroutine erase_entity(sSeriesname_)
 
-    character(len=*), intent(in), optional :: sSeriesName
+    character(len=*), intent(in), optional :: sSeriesName_
 
     ! [ LOCALS ]
-    type (T_TIME_SERIES), pointer :: pTS
-    type (T_TABLE), pointer :: pTable
+!    type (T_TIME_SERIES), pointer :: pTS
+!    type (T_TABLE), pointer :: pTable
+    type (T_NODE), pointer :: pNode
     integer (kind=T_INT) :: n
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
-    character (len=MAXARGLENGTH) :: sTempSeriesname
+    character (len=MAXARGLENGTH) :: sSeriesname
 
-    if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
+    if(present(sSeriesname_) .and. len_trim(sSeriesName_) > 0 ) then
     ! don't pass along the block object; use sSeriesName
 
-      sTempSeriesname = trim(sSeriesName)
+      sSeriesname = trim(sSeriesName_)
 
     elseif(str_compare(pBlock%sBlockName, "ERASE_ENTITY")) then
 
       pArgs =>pBlock%getString("SERIES_NAME")
-      sTempSeriesname = pArgs(1)
+      sSeriesname = pArgs(1)
 
-      call Assert(.not. str_compare(sTempSeriesname, "NA"), &
+      call Assert(.not. str_compare(sSeriesname, "NA"), &
         "A series name must be provided in an ERASE_ENTITY block", &
         trim(__FILE__), __LINE__)
 
@@ -2111,14 +2126,15 @@ end subroutine datestampsequal
 
     endif
 
-    pTS => TS%getSeries(sTempSeriesName)
-    pTable => TS%getTable(sTempSeriesName)
+!    pTS => TS%getSeries(sTempSeriesName)
+!    pTable => TS%getTable(sTempSeriesName)
+     call TS%removeNode(sSeriesName)
 
-    if(associated(pTS) )  call TS%removeTS(sTempSeriesName)
-    if(associated(pTable) )  call TS%removeTable(sTempSeriesName)
+!    if(associated(pTS) )  call TS%removeTS(sTempSeriesName)
+!    if(associated(pTable) )  call TS%removeTable(sTempSeriesName)
 
-    nullify(pTS)
-    nullify(pTable)
+!    nullify(pTS)
+!    nullify(pTable)
 
   end subroutine erase_entity
 
@@ -2216,6 +2232,14 @@ subroutine clear()
   call TS%clear()
 
 end subroutine clear
+
+!------------------------------------------------------------------------------
+
+subroutine makedot()
+
+  call TS%makeDot()
+
+end subroutine makedot
 
 !------------------------------------------------------------------------------
 

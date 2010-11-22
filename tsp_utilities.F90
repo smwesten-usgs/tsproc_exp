@@ -485,7 +485,7 @@ end function dbl2char_wsf
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: iStat
-    character(len=17) :: sDateStr, sDateStrPretty
+    character(len=24) :: sDateStr, sDateStrPretty
     character(len=256) :: sFilenameText
 
     if(present(sFilename)) then
@@ -803,7 +803,7 @@ end function clean
 
 subroutine GetSysTimeDate(sDateStr,sDateStrPretty)
 
-  character(len=17), intent(out) :: sDateStr, sDateStrPretty
+  character(len=24), intent(out) :: sDateStr, sDateStrPretty
 
   character (len=8) :: sDate
   character (len=10) :: sTime
@@ -813,11 +813,12 @@ subroutine GetSysTimeDate(sDateStr,sDateStrPretty)
   character (len=2) :: sHH
   character (len=2) :: sMM
   character (len=2) :: sSS
+  character (len=3) :: sMS
 
 !  sRecord = FDATE()
   call DATE_AND_TIME(sDate, sTime)
 
-  print *, quote(sDate)," ",quote(sTime)
+!  print *, quote(sDate)," ",quote(sTime)
 
 !  call chomp(sRecord,sDay)
 !  call chomp(sRecord,sMon)
@@ -828,11 +829,12 @@ subroutine GetSysTimeDate(sDateStr,sDateStrPretty)
   sMon = sDate(5:6)
   sYear = sDate(1:4)
   sHH = sTime(1:2)
-  sMM = sTime(4:5)
-  sSS = sTime(7:8)
+  sMM = sTime(3:4)
+  sSS = sTime(5:6)
+  sMS = sTime(8:10)
 
   sDateStr = TRIM(sYear)//"_"//TRIM(sMon)//"_"//TRIM(sDay)//"__"//&
-    TRIM(sHH)//"_"//TRIM(sMM)
+    TRIM(sHH)//"_"//TRIM(sMM)//"_"//TRIM(sSS)//"_"//trim(sMS)
   sDateStrPretty = &
     TRIM(sDay)//" "//TRIM(sMon)//" "//TRIM(sYear)//" " &
      //TRIM(sHH)//":"//TRIM(sMM)

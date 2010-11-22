@@ -603,6 +603,8 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
   do
     read(unit=LU_DATA, fmt="(a)",iostat=iStat) sRecord
     if(iStat /= 0) then
+      ! process the temporary file one last time to capture the
+      ! last time series read from the SSF file
       if( .not. lSkipThisSite ) then
         call pTS%resizeTemp()
         call pTS%findDateMinAndMax()
@@ -1067,7 +1069,6 @@ subroutine get_series_wdm(pBlock, TS)
 
 !  call TS%addSeries(pTS)
   call TS%insert(pNewSeries=pTS)
-
 
   end subroutine get_series_wdm
 

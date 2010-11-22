@@ -64,17 +64,21 @@ module tsp_collections
     procedure :: clear => remove_all_sub
     procedure :: calculate => calc_values_from_equation_fn
     procedure :: newTimeBase => conform_ts_sub
+    procedure :: removeNode => delete_node_from_tree_sub
     procedure :: removeTS => remove_ts_link_sub
     procedure :: removeTable => remove_table_link_sub
+    procedure, private :: deallocateNode => deallocate_node_and_contents_sub
     procedure :: insert => add_node_sub
     procedure :: rotateLeft => rotate_node_left_sub
     procedure :: rotateRight => rotate_node_right_sub
     procedure :: rebalanceTree => rebalance_tree_after_insert_sub
+    procedure :: restructureTree => restructure_tree_after_deletion_sub
     procedure :: traverse => traverse_entire_tree_sub
     procedure, public  :: summarize => summarize_sub
     procedure, private :: summarizeSeries => traverse_tree_summarize_series_sub
     procedure, private :: summarizeTable => traverse_tree_summarize_table_sub
     procedure :: describe => describe_ts_sub
+    procedure :: makeDot => make_dot
     procedure :: getNode => find_node_in_tree_fn
     procedure :: getSeries => get_ts_pointer_node_fn
     procedure :: getSeriesComparison => get_ts_comparison_pointer_fn
@@ -87,6 +91,8 @@ module tsp_collections
     procedure :: datesEqual => are_datetime_stamps_identical_fn
 
   end type TIME_SERIES_COLLECTION
+
+  type (T_NODE), target, save :: nil
 
 contains
 
@@ -106,6 +112,132 @@ recursive subroutine traverse_entire_tree_sub(this, pCurrent)
    end  if
 
 end subroutine traverse_entire_tree_sub
+
+!------------------------------------------------------------------------------
+
+subroutine make_dot(this)
+
+  class(TIME_SERIES_COLLECTION) :: this
+
+  integer (kind=T_INT) :: LU_DOT
+  integer (kind=T_INT) :: iNullCount
+  character(len=24) :: sDateStr, sDateStrPretty
+  character(len=256) :: sFilenamePrefix
+  character(len=256) :: sCommandLineText
+
+  iNullCount = 0
+  call GetSysTimeDate(sDateStr,sDateStrPretty)
+  sFilenamePrefix = trim("tsproc_tree_structure_"//trim(adjustl(sDateStr)))
+
+  open(unit=newunit(LU_DOT), file=trim(sFilenamePrefix)//".dot", status = 'REPLACE')
+  write(LU_DOT, fmt="(a)") 'digraph BST {'
+  write(LU_DOT, fmt="(a)") 'size="84.0,12.0";'
+  write(LU_DOT, fmt="(a)") 'ratio="fill";'
+
+  if(.not. associated(this%pRoot) ) then
+    write(LU_DOT, fmt="(a)") ''
+  elseif((.not. associated(this%pRoot%pRight) ) &
+     .and. (.not. associated(this%pRoot%pLeft) ) ) then
+    call set_node_color(this%pRoot%iColor)
+    write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename)
+    write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
+    write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename)//' -> null' &
+       //trim(asChar(iNullCount) )//';'
+    iNullCount = iNullCount + 1
+    write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
+    write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename)//' -> null' &
+       //trim(asChar(iNullCount) )//';'
+  else
+    call traverse_tree_connect_nodes_sub(this%pRoot, iNullCount)
+  endif
+
+  write(LU_DOT, fmt="(a)") '}'
+
+  flush(LU_DOT)
+  close(LU_DOT)
+
+  ! issue command line directive to make a *.PDF from the *.dot file
+  sCommandLineText = "dot -Tpdf "//trim(sFilenamePrefix)//".dot" &
+    //" -o "//trim(sFilenamePrefix)//".pdf"
+  call system(trim(sCommandLineText) )
+
+contains
+
+!   recursive subroutine traverse_tree_make_nodes_sub(pCurrent, iCount)
+!
+!      type (T_NODE), pointer        :: pCurrent
+!      integer (kind=T_INT) :: iCount
+!
+!      if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+!         call traverse_tree_make_nodes_sub(pCurrent%pLeft, iCount)
+!      end  if
+!
+!       write(LU_DOT, fmt="(a)") 'node'//trim(asChar(iCount))//'[label = ' &
+!          //'"<f0> |<f1> '//trim(pCurrent%sNodename)//'|<f2> "];'
+!      iCount = iCount + 1
+!
+!      if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+!         call traverse_tree_make_nodes_sub( pCurrent%pRight, iCount)
+!      endif
+!
+!   end subroutine traverse_tree_make_nodes_sub
+
+  recursive subroutine traverse_tree_connect_nodes_sub(pCurrent, iNullCount)
+
+     type (T_NODE), pointer        :: pCurrent
+     integer (kind=T_INT) :: iNullCount
+
+     if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+        call traverse_tree_connect_nodes_sub( pCurrent%pLeft, iNullCount)
+     end  if
+
+     call set_node_color(pCurrent%iColor)
+
+     if(associated(pCurrent%pLeft) ) then
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> ' &
+          //trim(pCurrent%pLeft%sNodename)//';'
+     else
+       iNullCount = iNullCount + 1
+       write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> null' &
+          //trim(asChar(iNullCount) )//';'
+     endif
+
+     if(associated(pCurrent%pRight) ) then
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> ' &
+          //trim(pCurrent%pRight%sNodename)//';'
+     else
+       iNullCount = iNullCount + 1
+       write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> null' &
+          //trim(asChar(iNullCount) )//';'
+     endif
+
+     if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+        call traverse_tree_connect_nodes_sub( pCurrent%pRight, iNullCount)
+     endif
+
+  end subroutine traverse_tree_connect_nodes_sub
+
+  subroutine set_node_color(iColor)
+
+    integer (kind=T_INT) :: iColor
+
+    if(iColor==BLACK) then
+      write(LU_DOT, fmt="(a)") &
+        'node [fontname=sans,fontsize=12,shape=box,style=filled,color=black, fontcolor=white ];'
+    elseif(iColor==RED) then
+      write(LU_DOT, fmt="(a)") &
+         'node [fontname=sans,fontsize=12,shape=box,style=filled,color=red3, fontcolor=white ];'
+    else
+      write(LU_DOT, fmt="(a)") &
+         'node [fontname=sans,fontsize=12,shape=box,style=filled,color=cyan, fontcolor=black ];'
+    endif
+
+  end subroutine set_node_color
+
+
+end subroutine make_dot
 
 !------------------------------------------------------------------------------
 
@@ -183,25 +315,29 @@ function find_node_in_tree_fn (this,sNodeName)   result (pPosition)
    type (T_NODE), pointer          :: pPosition
 
    this%pCurrent => this%pRoot
+   nullify(pPosition)
 
    do
       if (.not. associated(this%pCurrent ) ) then
          exit
       end if
 
-      print *, quote(this%pCurrent%sNodeName)," < = > ",quote(sNodeName)
-
       if ( LGT(this%pCurrent%sNodeName, sNodeName) ) then                !! Take the left path.
+      print *, quote(this%pCurrent%sNodeName)//" (tree) > (target) ",quote(sNodeName)
          this%pCurrent => this%pCurrent%pLeft
       else if (LLT(this%pCurrent%sNodeName, sNodeName) ) then           !! Take the right path.
+      print *, quote(this%pCurrent%sNodeName)//" (tree) < (target) ",quote(sNodeName)
          this%pCurrent => this%pCurrent%pRight
       else                                        !! The desired element was found.
          pPosition => this%pCurrent
+      print *, quote(this%pCurrent%sNodeName)//" (tree) == (target) ",quote(sNodeName)
          return
       end  if
    end  do
 
    nullify (pPosition)                             !! The element did not exist in the tree.
+   call assert(lFALSE,"Failed to find series "//quote(sNodeName)//" in tree structure.", &
+     trim(__FILE__), __LINE__)
 
 end function find_node_in_tree_fn
 
@@ -233,37 +369,50 @@ end function find_node_in_tree_fn
 
       pX => this%pCurrent
 
-      do                                          !! We execute this loop, and re-execute it,
-                                                                                !! when pX and its parent are both red.
-         lIterating = .not. associated (pX, this%pRoot)   !! Cannot iterate when we are at the root.{pXE "ASSOCIATED built-in function"}
-         if (lIterating) then                      !! There must be a parent . . . .
-            lIterating = pX%pParent%iColor == RED
-         end  if                                  !!{pXE "logical operator: .EQV."}{pXE "EQV" \t "see .EQV.}
-         if (lIterating) then                      !! . . . and there must be a grandparent.
-            lIterating = associated (pX%pParent%pParent)
-         end  if
-         if (.not. lIterating) then                !! We enter this loop when pX and its parent are both red.
-            exit
-         end  if
+      !! We execute this loop, and re-execute it,
+      !! when pX and its parent are both red.
+      do
+         !! Begin barrage of tests to figure out whether we should even be here...
+         !! Cannot iterate when we are at the root.
+         lIterating = .not. associated (pX, this%pRoot)
+         !! Current node must be red...
+         if (lIterating) lIterating = (pX%iColor == RED)
+         !! There must be a parent . . . .
+         if (lIterating) lIterating = associated(pX%pParent)
+         !! Parent must must be red . . . .
+         if (lIterating) lIterating = (pX%pParent%iColor == RED)
+         !! . . . and there must be a grandparent.
+         if (lIterating) lIterating = associated (pX%pParent%pParent)
 
+         !! We enter this loop when pX and its parent are both red.
+         !!  *AND* when its grandparent exists...
+         if (.not. lIterating) exit
+
+         !! If true, the parent is a left node of pX's grandparent.
          if (associated (pX%pParent, pX%pParent%pParent%pLeft) ) then
-                                                                                !! The parent is a left node of pX's grandparent.
-            pY => pX%pParent%pParent%pRight            !! Get the address of the uncle.
+
+            !! Get the address of the uncle.
+            pY => pX%pParent%pParent%pRight
+            ! test to make sure uncle isn't a null pointer, and that uncle is RED
             lRedUncle = associated(pY)
+            if (lRedUncle)  lRedUncle = (pY%iColor == RED)
+
+            !! CASE 1.  If TRUE, There is an uncle.  pX and its parent and
+            !! uncle are all red.  Fix violation of Rule 3.
             if (lRedUncle) then
-               lRedUncle = pY%iColor == RED
-            end  if
-            if (lRedUncle) then
-               !! CASE 1.  There is an uncle.  pX and its parent and
-               !! uncle are all red.  Fix violation of Rule 3.
-               pX%pParent%iColor = BLACK             !! The parent must be black.
-               pY%iColor = BLACK                    !! The uncle must be black.
+               !! The parent must be black.
+               pX%pParent%iColor = BLACK
+               !! The uncle must be black.
+               pY%iColor = BLACK
+               !! The grandparent must be red.
                pX%pParent%pParent%iColor = RED
-                                                                                !! The grandparent must be red.
-               pX => pX%pParent%pParent               !! Move 2 places up the tree, to the grandparent.
-            else                                  !! The uncle is black, or is non-existent.
-               if (associated (pX, pX%pParent%pRight) ) then !! CASE 2.{pXE "ASSOCIATED built-in function: to compare pointers"}
-                  pX => pX%pParent                   !! Move up the tree.
+               !! Move 2 places up the tree, to the grandparent.
+               pX => pX%pParent%pParent
+            else !! The uncle is black, or is non-existent.
+
+               !! CASE 2. Move up the tree
+               if (associated (pX, pX%pParent%pRight) ) then
+                  pX => pX%pParent
                   call this%rotateLeft(pX)
                end  if
                !! CASE 3.
@@ -273,20 +422,24 @@ end function find_node_in_tree_fn
             end  if
          !! This segment is the mirror image of the code for the "then" part,
          !! with the words Right and Left interchanged.
-         else                                     !! The parent is a right node of pX's grandparent.
-            pY => pX%pParent%pParent%pLeft             !! Get the address of the uncle.
+         else  !! The parent is a right node of pX's grandparent.
+            !! Get the address of the uncle.
+            pY => pX%pParent%pParent%pLeft
             lRedUncle = associated(pY)
+            if (lRedUncle) lRedUncle = (pY%iColor == RED)
+
+            !! CASE 1.
             if (lRedUncle) then
-               lRedUncle = pY%iColor == RED
-            end  if
-            if (lRedUncle) then                   !! CASE 1.
-               pX%pParent%iColor = BLACK             !! The parent must be black.
-               pY%iColor = BLACK                    !! The uncle must be black.
+               !! The parent must be black.
+               pX%pParent%iColor = BLACK
+               !! The uncle must be black.
+               pY%iColor = BLACK
+               !! The grandparent must be red.
                pX%pParent%pParent%iColor = RED
-                                                                                !! The grandparent must be red.
-               pX => pX%pParent%pParent               !! Move 2 places up the tree, to the grandparent.
-            else                                  !! pX and its parent are red, but its uncle is black
-                                                                                !! or is missing.  Fix violation of Rule 3.
+               !! Move 2 places up the tree, to the grandparent.
+               pX => pX%pParent%pParent
+            else !! pX and its parent are red, but its uncle is black
+                 !! or is missing.  Fix violation of Rule 3.
                if (associated (pX, pX%pParent%pLeft) ) then !! CASE 2.
                   pX => pX%pParent                   !! Move up the tree.
                   call this%rotateRight(pX)
@@ -303,6 +456,277 @@ end function find_node_in_tree_fn
       this%pCurrent => this%pRoot
 
   end subroutine rebalance_tree_after_insert_sub
+
+!------------------------------------------------------------------------------
+
+!! This subroutine deletes a node from a Red-Black binary tree.
+!! There are four main sections.  In the first section, the tree is checked to see if it
+!! is empty, and if it is, the subroutine quits.
+!! The second section deals with the case where the node to be deleted has two children.
+!! The third section deals with the straight-forward case where the node to be deleted
+!! has no children.
+!! The fourth section deals with the case where the node to be deleted has one child.
+  subroutine  delete_node_from_tree_sub(this, sNodename)
+      !! INCOMING: pTarget points at the node to be deleted.
+      class(TIME_SERIES_COLLECTION) :: this
+      character (len=*), intent(in) :: sNodename
+
+      ! [ LOCALS ]
+      type (T_NODE), pointer         :: pChild, pX
+
+      pX => this%getNode(sNodename)
+
+!! Case 1:  the tree is empty.
+      if (.not. associated (pX) ) then             !! The tree is empty.
+         return
+      end  if
+
+!! Case 2:  the node has 2 children.
+      !! We find the successor node, move the content of that node to the current node pX,
+      !! and then delete the successor node.
+      if (associated (pX%pLeft) .and. associated (pX%pRight) ) then !! Find the next-largest node.
+                                                                                !! The next-largest node is found in the right
+                                                                                !! subtree.
+         pChild => pX%pRight
+
+         do
+            if (.not. associated (pChild%pLeft) ) then !! Seek the left-most node of the subtree.
+               exit
+            end  if
+            pChild => pChild%pLeft
+         end  do
+!         pX%Item = pChild%Item                      !! Replace the Item to be deleted by its successor.
+         !! pChild is a node to be deleted.
+         pX => pChild                               !! The successor is now due for deletion.
+                                                                                !! This will be handled by Case 3 (the node is a
+                                                                                !! leaf) or by Case 4 (the node has one child).
+      end if
+
+      !! Now delete node pX.
+!! Case 3:  the node has no children.
+      if (.not. associated (pX%pRight) .and. .not. associated (pX%pLeft) ) then
+                                                                                !! The node is a leaf.
+         if (.not. associated (pX%pParent) ) then   !! Node pX is the root.
+!            deallocate (pX)
+            call this%deallocateNode(pX)
+            nullify (this%pRoot)
+            return
+         end  if
+         if (pX%iColor == BLACK) then            !! If the color of the node to be deleted is black . . .
+            call this%restructureTree(pX)
+         end  if
+         if (associated (pX, pX%pParent%pRight) ) then!! Chop off the leaf pX.
+            nullify (pX%pParent%pRight)              !! Remove pX which is a right child..
+         else
+            nullify (pX%pParent%pLeft)               !! Remove pX which is a left child.
+         end  if
+!         deallocate (pX)
+         call this%deallocateNode(pX)
+         return
+      end  if
+
+!! Case 4:  the node has one child.  First find out which it is, and then splice it out.
+      if (.not. associated (pX%pRight) ) then
+         pChild => pX%pLeft                          !! It's a left child of pX.
+      else
+         pChild => pX%pRight                         !! It's a right child of pX.
+      end  if
+
+      if (.not. associated (pX%pParent) ) then      !! Node pX is the root.
+         this%pRoot => pChild                            !! pX's only child becomes the root.
+         call this%deallocateNode(pX)
+!         deallocate (pX)                           !! Get rid of pX.
+         nullify (this%pRoot%pParent)                    !! The root can't have a parent.
+         this%pRoot%iColor = Black                       !! Color it black . . .
+         return                                   !! . . . and quit.
+      else                                        !! Node pX is not the root.       !! Splice out the node.
+         !! Make the grandparent point at the child.
+         if (associated (pX, pX%pParent%pRight) ) then!! Node pX is a right child.
+            pX%pParent%pRight => pChild
+         else                                     !! Node pX is a left child.
+            pX%pParent%pLeft => pChild
+         end  if
+
+         pChild%pParent => pX%pParent                 !! Make the child point up at the grandparent.
+
+      end  if
+
+      !! The next segment will restructure the tree when the deleted node is black.  However,
+      !! there is one particular case when the deleted note is black and its child is red.  In this
+      !! situation, its child is merely re-colored black, thus restoring the deficiency of one black node.
+      !! The following code indirectly achieves this: RESTRUCTURE_AFTER_DELETION is called,
+      !! its main loop is not executed, and the subroutine terminates after re-coloring the child black.
+      if (pX%iColor == BLACK) then               !! If the color of the node to be deleted is black . . .
+         call this%restructureTree(pChild)
+      end  if
+
+      call this%deallocateNode(pX)
+!      deallocate (pX)
+
+  end subroutine delete_node_from_tree_sub
+
+!------------------------------------------------------------------------------
+
+  subroutine deallocate_node_and_contents_sub(this, pNode)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    type (T_NODE), pointer :: pNode
+
+    ! [ LOCALS ]
+    character (len=256) :: sDescription
+
+    if(associated(pNode) ) then
+      if(associated(pNode%pTS) ) then
+        sDescription = pNode%pTS%sDescription
+        deallocate(pNode%pTS)
+        this%iNumTimeSeries = this%iNumTimeSeries - 1
+        call echolog("")
+        call echolog("Deleted: "//trim(sDescription)//"." )
+        call echolog("  [There are now "//trim(asChar(this%iNumTimeSeries) ) &
+          //" time series in memory.]")
+        call echolog("")
+      endif
+
+      if(associated(pNode%pTable) ) then
+        sDescription = pNode%pTable%sDescription
+        deallocate(pNode%pTable)
+        this%iNumTables = this%iNumTables - 1
+        call echolog("")
+        call echolog("Deleted: "//trim(sDescription)//"." )
+        call echolog("  [There are now "//trim(asChar(this%iNumTables) ) &
+          //" tables in memory.]")
+        call echolog("")
+      endif
+
+    endif
+
+    deallocate(pNode)
+
+  end subroutine deallocate_node_and_contents_sub
+
+!------------------------------------------------------------------------------
+
+!! This procedure re-colors nodes and/or restructures a Red-Black tree following a deletion.
+!! This routine is entered when the deleted node was black.  (Node X is the child of the
+!! deleted node).
+!! The crux is to balance the two subtrees whose roots are node X and its brother.
+!! General strategy:
+!! (1) Simple case: If the child of the deleted node is red, change it to black and finish.
+!! (2) General case:  Either:
+!! (2a) Perform a rotation about the parent, so as to bring a node into the subtree, to
+!!      compensate for the deleted node.  In this case, color the new node black and finish.
+!! (2b) Change a node of the sibling's subtree from black to red, and move up the tree.
+!!       In this event, repeat step (2).
+  subroutine restructure_tree_after_deletion_sub(this, pTarget)
+      !! INCOMING: Current = points at the child of the deleted node.
+      class(TIME_SERIES_COLLECTION) :: this
+      type (T_NODE), pointer :: pTarget
+
+      type (T_NODE), pointer         :: pX
+      type (T_NODE), pointer         :: pBrother
+
+      pX => pTarget
+
+TREE_CLIMBING_LOOP:                 &
+      do
+         if ( associated(pX, this%pRoot) .or. (pX%iColor == RED)) then
+            exit                                  !! Quit when we are at the root, or if the node is red.
+         end  if
+         !! The crux balances the two subtrees whose roots are at node pX and its brother.
+         if (associated (pX, pX%pParent%pLeft) ) then !! Node pX is a left child.
+            pBrother => pX%pParent%pRight
+            if (pBrother%iColor == RED) then
+                                                                                !! Case 1: Rotate left about pX's parent, and re-colo
+               pBrother%iColor = BLACK
+               pX%pParent%iColor = RED
+               call  this%rotateLeft(pX%pParent)
+               pBrother => pX%pParent%pRight
+            end  if                               !!  . . . and move on to apply case 2.
+
+            if ( get_node_color(pBrother%pLeft) == BLACK .and.   &  !! If both children of the
+               get_node_color(pBrother%pRight) == BLACK) then !! brother  are black . . .
+               !! Case 2: Color the brother red, and move up the tree.
+               pBrother%iColor = RED
+               pX => pX%pParent                      !! Move up the tree.
+            else
+               if (get_node_color (pBrother%pRight) == BLACK) then
+                                                                                !! Case 3: Rotate right about the brother, and re-co
+                  if (associated(pBrother%pLeft) ) then
+                     pBrother%pLeft%iColor = BLACK
+                  end  if
+                  pBrother%iColor = RED
+                  call  this%rotateRight(pBrother)
+                  pBrother => pX%pParent%pRight
+               end  if                            !! . . . and go on to Case 4.
+
+               !! Case 4: Rotate left about pX's parent, which brings an extra node to
+               !! the subtree through pX, and which is then colored black.
+               pBrother%iColor = pX%pParent%iColor
+               pX%pParent%iColor = BLACK
+               pBrother%pRight%iColor = BLACK
+               call  this%rotateLeft(pX%pParent)       !! Brings a black node to the left
+                                                                                !! subtree; pLeft & pRight subtrees are balanced.
+               exit TREE_CLIMBING_LOOP            !! Quit, rebalancing is complete.
+            end  if
+         else                                     !! Node pX is a right child.
+            !! Same as the THEN clause, with "pRight" and "pLeft" interchanged.
+            pBrother => pX%pParent%pLeft
+            if (pBrother%iColor == RED) then
+                                                                                !! Case 1: Rotate left about pX's parent, and re-colo
+               pBrother%iColor = BLACK
+               pX%pParent%iColor = RED
+               call  this%rotateRight(pX%pParent)
+               pBrother => pX%pParent%pLeft
+            end  if                               !!  . . . and move on to apply case 2.
+
+            if ( get_node_color(pBrother%pLeft) == BLACK .and.   &  !! If both children of the
+               get_node_color(pBrother%pRight) == BLACK) then !! brother  are black . . .
+               !! Case 2: Color the brother red, and move up the tree.
+               pBrother%iColor = RED
+               pX => pX%pParent                      !! Move up the tree.
+            else
+               if (get_node_color(pBrother%pLeft) == BLACK) then
+                                                                                !! Case 3: Rotate left about the brother, and re-col
+                  if (associated(pBrother%pRight) ) then
+                     pBrother%pRight%iColor = BLACK
+                  endif
+                  pBrother%iColor = RED
+                  call  this%rotateLeft(pBrother)
+                  pBrother => pX%pParent%pLeft
+               endif                            !! . . . and go on to Case 4.
+
+               !! Case 4: Rotate right about pX's parent, which brings an extra node to
+               !! the subtree through pX, and which is then colored black.
+               pBrother%iColor = pX%pParent%iColor
+               pX%pParent%iColor = BLACK
+               pBrother%pLeft%iColor = BLACK
+               call this%rotateRight(pX%pParent)      !! Brings a black node to the right
+                                                                                !! subtree; pLeft & pRight subtrees are balanced.
+               exit TREE_CLIMBING_LOOP            !! Quit, rebalancing is complete.
+            end  if
+         end  if
+
+      end  do  TREE_CLIMBING_LOOP
+
+      pX%iColor = BLACK                             !! Having encountered a red node, color it black and quit.
+
+  end subroutine restructure_tree_after_deletion_sub
+
+!------------------------------------------------------------------------------
+
+!! This function returns the color of the specified node, or black if the node does not exist.
+function get_node_color(pNode) result (iNodeColor)
+   !! INCOMING: Node_Ptr = a pointer to the node whose color is to be obtained.
+   type (T_NODE), pointer            :: pNode
+   integer (kind=T_INT) :: iNodeColor
+
+   if (associated (pNode)) then
+      iNodeColor = pNode%iColor
+   else
+      iNodeColor = BLACK
+   end  if
+
+  end function get_node_color
 
 !------------------------------------------------------------------------------
 
@@ -490,7 +914,6 @@ end function find_node_in_tree_fn
     ! set root and current pointer to root
     this%pCurrent => this%pRoot
 
-
     allocate(pNewNode)
 
     ! set the node pointer pTS to the series to be added
@@ -528,10 +951,14 @@ end function find_node_in_tree_fn
 
       pParentOfCurrent => this%pCurrent
 
-      if( LLT(pNewNode%sNodeName,this%pCurrent%sNodeName) ) then
+      ! if current node name > NEW node name, take LEFT path
+      if( LGT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
         this%pCurrent => this%pCurrent%pLeft
-      elseif( LGT(pNewNode%sNodeName,this%pCurrent%sNodeName) ) then
+
+      ! if current node name < NEW node name, take RIGHT path
+      elseif( LLT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
         this%pCurrent => this%pCurrent%pRight
+
       else
         call assert(lFALSE,"Series name "//quote(pNewNode%sNodeName) &
           //" has already been used. ", &
@@ -541,10 +968,13 @@ end function find_node_in_tree_fn
 
     enddo
     ! upon exit, we have found a node whose left or right pointer field is null
+    ! pCurrent is NULL at this point as well
 
     pNewNode%pParent => pParentOfCurrent
+    pNewNode%iColor = RED
 
-    if(.not. associated(pParentOfCurrent) ) then
+    if(.not. associated(pParentOfCurrent) ) then  ! we're at the root; color it BLACK
+      pNewNode%iColor = BLACK
       this%pRoot => pNewNode
     elseif( LLT(pNewNode%sNodeName,pParentOfCurrent%sNodeName) ) then
       pParentOfCurrent%pLeft => pNewNode
@@ -552,10 +982,73 @@ end function find_node_in_tree_fn
       pParentOfCurrent%pRight => pNewNode
     endif
 
+    ! update global pointer to new node
     this%pCurrent => pNewNode
     nullify(pNewNode)
 
+    call this%makeDot()
+
+    ! must rebalance tree following an addition
+    call this%rebalanceTree()
+
+    call this%makeDot()
+
   end subroutine add_node_sub
+
+!------------------------------------------------------------------------------
+  subroutine rebalance_tree_after_insert_v2_sub(this)
+
+    class(TIME_SERIES_COLLECTION) :: this
+
+    ! [ LOCALS ]
+    type(T_NODE), pointer :: pX => null()
+    type(T_NODE), pointer :: pY => null()
+
+    pX => this%pCurrent
+
+      do while (associated(pX%pParent) .and. associated(pX%pParent%pParent) )
+       if(pX%pParent%iColor == BLACK) exit
+       ! need to guard against perfoming ops on null pointers       if(.not. associated(pX%pParent%pParent)) exit
+       if (associated(pX%pParent%pParent%pLeft, pX%pParent)) then
+          pY => pX%pParent%pParent%pRight   ! uncle
+          ! if parent and uncle are both red, current node cannot also be red
+          if (pY%iColor == RED) then
+             pX % pParent %iColor = BLACK
+             pY % iColor = BLACK
+             pX % pParent % pParent % iColor = RED
+             pX => pX % pParent % pParent   ! move up to grandparent
+          else
+             if (associated(pX, pX % pParent % pRight)) then
+                pX => pX % pParent
+                call this%rotateLeft(pX)
+             end if
+             pX % pParent % iColor = BLACK
+             pX % pParent % pParent % iColor = RED
+             call this%rotateRight(pX % pParent % pParent)
+          end if
+       elseif (associated(pX%pParent%pParent%pRight, pX%pParent)) then
+          ! must be Right grandchild to get here
+          pY => pX % pParent % pParent % pLeft    ! aunt
+          if (pY % iColor == RED) then
+             pX % pParent % iColor = BLACK
+             pY % iColor = BLACK
+             pX % pParent % pParent % iColor = RED
+             pX => pX % pParent % pParent
+          else
+             if (associated(pX, pX % pParent % pLeft)) then
+                pX => pX % pParent
+                call this%rotateRight(pX)
+             end if
+             pX % pParent % iColor = BLACK
+             pX % pParent % pParent % iColor = RED
+             call this%rotateLeft(pX % pParent % pParent)
+          end if
+       end if
+    end do
+
+    this % pRoot % iColor = BLACK
+
+  end subroutine rebalance_tree_after_insert_v2_sub
 
 !------------------------------------------------------------------------------
 
@@ -1231,6 +1724,8 @@ end function find_node_in_tree_fn
 
     pNode => this%getNode(sSeriesName)
     pTS => pNode%pTS
+
+    nullify(pNode)
 
   end function get_ts_pointer_node_fn
 
