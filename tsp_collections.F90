@@ -25,14 +25,19 @@ module tsp_collections
     real (kind=T_SGL), dimension(:), allocatable :: rWeightValue
   end type T_TABLE_COMPARISON
 
-  integer (kind=T_INT), parameter, private :: RED = 0
-  integer (kind=T_INT), parameter, private :: BLACK = 1
+  integer (kind=T_INT), parameter, private :: BLACK = 0
+  integer (kind=T_INT), parameter, private :: RED = 1
+  integer (kind=T_INT), parameter, private :: LEFT = 1
+  integer (kind=T_INT), parameter, private :: RIGHT =2
 
   type :: T_NODE
     type (T_NODE), pointer :: pRight => null()
     type (T_NODE), pointer :: pLeft => null()
     type (T_NODE), pointer :: pParent => null()
+    type (T_NODE), dimension(:), pointer :: pLink
+
     integer (kind=T_INT) :: iColor = RED
+
     character (len=256) :: sNodeName = ""
     type (T_TIME_SERIES), pointer :: pTS => null()
     type (T_TABLE), pointer :: pTable => null()
@@ -92,9 +97,286 @@ module tsp_collections
 
   end type TIME_SERIES_COLLECTION
 
-  type (T_NODE), target, save :: nil
-
 contains
+
+subroutine insert_top_down_sub(this, pNewNode)
+
+   class(TIME_SERIES_COLLECTION) :: this
+   type (T_NODE), pointer        :: pNewNode
+
+   ! [ LOCALS ]
+   type (T_NODE), pointer        :: pFalseRoot
+   type (T_NODE), pointer        :: pG, pT      ! pointers to grandparent and parent
+   type (T_NODE), pointer        :: pP, pQ      ! pointers to parent and iterator
+   integer (kind=T_INT) :: iDir, iDir2, iLast
+
+   ! initialize direction index
+   iDir = LEFT
+   iLast = LEFT
+
+   ! if we're given a null pointer as a new node, return without doing anything!
+   if(.not. associated(pNewNode) ) return
+
+   if( .not. associated(this%pRoot ) ) then
+     ! empty tree case
+     this%pRoot => pNewNode
+
+
+   else
+
+     if(.not. associated(pFalseRoot) ) allocate(pFalseRoot)
+
+     ! set up helper pointers
+     pFalseRoot%pRight => this%pRoot
+     pT => pFalseRoot
+     pQ => this%pRoot
+     nullify(pG)
+     nullify(pP)
+
+     do
+       if(.not. associated(pQ) ) then
+         ! insert new node at bottom
+         pQ => pNewNode
+
+
+         if(associated(pP) )  then
+
+           select case (iDir)
+
+             case(LEFT)
+               pP%pLeft => pNewNode
+
+             case(RIGHT)
+               pP%pRight => pNewNode
+
+           end select
+         endif
+
+         exit
+
+       elseif(get_node_color(pQ%pLeft) == RED &
+              .and. get_node_color(pQ%pRight) == RED ) then
+         ! color flip
+
+         call set_node_color(pQ, RED)
+         call set_node_color(pQ%pLeft, BLACK)
+         call set_node_color(pQ%pRight, BLACK)
+       endif
+
+       ! Fix red violation: child and parent cannot both be red
+       if( get_node_color(pQ) == RED .and. get_node_color(pP) == RED ) then
+         iDir2 = get_direction(associated(get_right_pointer(pT), pG) )
+
+         select case(iLast)
+           case(LEFT)
+
+             if(associated(pQ, get_left_pointer(pP) ) ) then
+               select case(iDir2)
+                 case(LEFT)
+
+                   pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
+                 case(RIGHT)
+
+                   pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
+               end select
+
+             else
+               print *, "last = LEFT; dir2=LEFT; pQ unassoc w pP%pLeft"
+               select case(iDir2)
+                 case(LEFT)
+
+                   pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
+                 case(RIGHT)
+                 print *, "last = LEFT; dir2=RIGHT; pQ unassoc w pP%pLeft"
+                   pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
+               end select
+
+             endif
+
+           case(RIGHT)
+
+             if(associated(pQ, get_right_pointer(pP) ) ) then
+               select case(iDir2)
+
+                 case(LEFT)
+                 print *, "last = RIGHT; dir2=LEFT"
+                   pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
+                 case(RIGHT)
+                 print *, "last = RIGHT; dir2=RIGHT"
+                   pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
+               end select
+
+             else
+               select case(iDir2)
+                 case(LEFT)
+                 print *, "last = RIGHT; dir2=LEFT; pQ unassoc w pP"
+                   pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
+                 case(RIGHT)
+                 print *, "last = RIGHT; dir2=RIGHT; pQ unassoc w pP"
+                   pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
+               end select
+             endif
+
+         end select
+
+       endif
+
+       ! if after the rotations we have a null pointer at the current node, cycle and
+       ! allow pNewNode to be placed appropriately
+       if (.not. associated(pQ) ) cycle
+
+       iLast = iDir
+       iDir = get_direction( LLT(pQ%sNodename, pNewNode%sNodename) )
+
+       if (associated(pG) )  pT => pG
+       pG => pP
+       pP => pQ
+
+       select case(iDir)
+
+         case(LEFT)
+
+           pQ => pQ%pLeft
+
+         case(RIGHT)
+
+           pQ => pQ%pRight
+
+       end select
+
+       if(associated(pQ)) then
+         if(str_compare(pQ%sNodename, pNewNode%sNodename) ) then
+           call assert(lFALSE, "Duplicate series names are not allowed! Found more than " &
+             //"one instance of series "//quote(pNewNode%sNodename), &
+             trim(__FILE__), __LINE__)
+         endif
+       endif
+
+     enddo
+
+     ! update root
+     this%pRoot => pFalseRoot%pRight
+
+   endif
+
+   ! ensure root node is black
+   call set_node_color(this%pRoot, BLACK)
+
+end subroutine insert_top_down_sub
+
+!------------------------------------------------------------------------------
+
+function node_single_rotation_fn(pPivot, iDirection)    result(pSave)
+
+  type (T_NODE), pointer :: pPivot
+  integer (kind=T_INT) :: iDirection
+  type (T_NODE), pointer :: pSave
+
+  if(associated(pPivot) ) then
+
+    nullify(pSave)
+
+    select case(iDirection)
+
+      case(LEFT)
+
+        pSave => pPivot%pRight
+        if(associated(pSave) ) then
+          pPivot%pRight => get_left_pointer(pSave)
+          pSave%pLeft => pPivot
+          call set_node_color(pPivot, RED)
+          call set_node_color(pSave, BLACK)
+        endif
+
+      case(RIGHT)
+
+        pSave => pPivot%pLeft
+        if(associated(pSave) ) then
+          pPivot%pLeft => get_right_pointer(pSave)
+          pSave%pRight => pPivot
+          call set_node_color(pPivot, RED)
+          call set_node_color(pSave, BLACK)
+        endif
+
+      case default
+
+        call assert(lFALSE,"Unhandled select case item: iDirection = "//trim(asChar(iDirection)), &
+          trim(__FILE__), __LINE__)
+
+    end select
+
+  endif
+
+end function node_single_rotation_fn
+
+!------------------------------------------------------------------------------
+
+subroutine pointer_status(iLine, pQ, pT, pG, pP)
+
+   integer (kind=T_INT) :: iLIne
+   type (T_NODE), pointer        :: pG, pT      ! pointers to grandparent and parent
+   type (T_NODE), pointer        :: pP, pQ      ! pointers to parent and iterator
+
+
+  print *, "Line: ",iLine
+
+  print *, "pQ: ", associated(pQ)
+  print *, "pQ%pLeft: ", associated(get_left_pointer(pQ))
+  print *, "pQ%pRight: ", associated(get_right_pointer(pQ))
+
+  print *, "pP: ", associated(pP)
+  print *, "pP%pLeft: ", associated(get_left_pointer(pP))
+  print *, "pP%pRight: ", associated(get_right_pointer(pP))
+
+  print *, "pG: ", associated(pG)
+  print *, "pG%pLeft: ", associated(get_left_pointer(pG))
+  print *, "pG%pRight: ", associated(get_right_pointer(pG))
+
+  print *, "pT: ", associated(pT)
+  print *, "pT%pLeft: ", associated(get_left_pointer(pT))
+  print *, "pT%pRight: ", associated(get_right_pointer(pT))
+  print *
+
+
+end subroutine pointer_status
+
+
+function node_double_rotation_fn(pPivot, iDirection)    result(pSave)
+
+  type (T_NODE), pointer :: pPivot
+  integer (kind=T_INT) :: iDirection
+  type (T_NODE), pointer :: pSave
+
+  nullify(pSave)
+
+  if(associated(pPivot) ) then
+
+    select case(iDirection)
+
+      case(LEFT)
+
+        pPivot%pLeft &
+          => node_single_rotation_fn(pPivot%pLeft,flip_direction(iDirection))
+        pSave => node_single_rotation_fn(pPivot, iDirection)
+
+      case(RIGHT)
+
+        pPivot%pRight &
+          => node_single_rotation_fn(pPivot%pRight,flip_direction(iDirection))
+        pSave => node_single_rotation_fn(pPivot, iDirection)
+
+      case default
+
+        call assert(lFALSE,"Unhandled select case item: iDirection = "//trim(asChar(iDirection)), &
+          trim(__FILE__), __LINE__)
+
+    end select
+
+  endif
+
+end function node_double_rotation_fn
+
+!------------------------------------------------------------------------------
 
 recursive subroutine traverse_entire_tree_sub(this, pCurrent)
 
@@ -138,7 +420,19 @@ subroutine make_dot(this)
     write(LU_DOT, fmt="(a)") ''
   elseif((.not. associated(this%pRoot%pRight) ) &
      .and. (.not. associated(this%pRoot%pLeft) ) ) then
-    call set_node_color(this%pRoot%iColor)
+
+     ! define the node shape and color
+     if(this%pRoot%iColor == RED) then
+       write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename) &
+         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=red1, fontcolor=white ];'
+     elseif(this%pRoot%iColor == BLACK) then
+       write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename) &
+         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=black, fontcolor=white ];'
+     else
+       write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename) &
+         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=cyan, fontcolor=white ];'
+     endif
+
     write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename)
     write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
     write(LU_DOT, fmt="(a)") '    '//trim(this%pRoot%sNodename)//' -> null' &
@@ -187,11 +481,22 @@ contains
      type (T_NODE), pointer        :: pCurrent
      integer (kind=T_INT) :: iNullCount
 
+
      if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
         call traverse_tree_connect_nodes_sub( pCurrent%pLeft, iNullCount)
      end  if
 
-     call set_node_color(pCurrent%iColor)
+     ! define the node shape and color
+     if(pCurrent%iColor == RED) then
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename) &
+         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=red1, fontcolor=white ];'
+     elseif(pCurrent%iColor == BLACK) then
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename) &
+         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=black, fontcolor=white ];'
+     else
+       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename) &
+         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=cyan, fontcolor=white ];'
+     endif
 
      if(associated(pCurrent%pLeft) ) then
        write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> ' &
@@ -218,24 +523,6 @@ contains
      endif
 
   end subroutine traverse_tree_connect_nodes_sub
-
-  subroutine set_node_color(iColor)
-
-    integer (kind=T_INT) :: iColor
-
-    if(iColor==BLACK) then
-      write(LU_DOT, fmt="(a)") &
-        'node [fontname=sans,fontsize=12,shape=box,style=filled,color=black, fontcolor=white ];'
-    elseif(iColor==RED) then
-      write(LU_DOT, fmt="(a)") &
-         'node [fontname=sans,fontsize=12,shape=box,style=filled,color=red3, fontcolor=white ];'
-    else
-      write(LU_DOT, fmt="(a)") &
-         'node [fontname=sans,fontsize=12,shape=box,style=filled,color=cyan, fontcolor=black ];'
-    endif
-
-  end subroutine set_node_color
-
 
 end subroutine make_dot
 
@@ -714,19 +1001,103 @@ TREE_CLIMBING_LOOP:                 &
 
 !------------------------------------------------------------------------------
 
-!! This function returns the color of the specified node, or black if the node does not exist.
-function get_node_color(pNode) result (iNodeColor)
-   !! INCOMING: Node_Ptr = a pointer to the node whose color is to be obtained.
-   type (T_NODE), pointer            :: pNode
-   integer (kind=T_INT) :: iNodeColor
+  function get_right_pointer(pNode)   result(pMember)
 
-   if (associated (pNode)) then
+    type (T_NODE), pointer            :: pNode
+    type (T_NODE), pointer            :: pMember
+
+    if(associated(pNode) ) then
+
+      pMember => pNode%pRight
+
+    else
+
+      pMember => null()
+
+    endif
+
+  end function get_right_pointer
+
+!------------------------------------------------------------------------------
+
+  function get_left_pointer(pNode)   result(pMember)
+
+    type (T_NODE), pointer            :: pNode
+    type (T_NODE), pointer            :: pMember
+
+    if(associated(pNode) ) then
+
+      pMember => pNode%pLeft
+
+    else
+
+      pMember => null()
+
+    endif
+
+  end function get_left_pointer
+
+!------------------------------------------------------------------------------
+
+  !! This function returns the color of the specified node, or black if the node does not exist.
+  function get_node_color(pNode) result (iNodeColor)
+    !! INCOMING: Node_Ptr = a pointer to the node whose color is to be obtained.
+    type (T_NODE), pointer            :: pNode
+    integer (kind=T_INT) :: iNodeColor
+
+    if (associated (pNode)) then
       iNodeColor = pNode%iColor
-   else
+    else
       iNodeColor = BLACK
-   end  if
+    end  if
 
   end function get_node_color
+
+!------------------------------------------------------------------------------
+
+  function flip_direction(iDirection)  result(iFlippedDirection)
+
+    integer (kind=T_INT) :: iDirection
+    integer (kind=T_INT) :: iFlippedDirection
+
+    if(iDirection == LEFT) then
+      iFlippedDirection = RIGHT
+    else
+      iFlippedDirection = LEFT
+    endif
+
+  end function flip_direction
+
+
+
+  !! This function returns the color of the specified node, or black if the node does not exist.
+  function get_direction(lCondition) result (iDirection)
+
+    logical (kind=T_LOGICAL) :: lCondition
+    integer (kind=T_INT) :: iDirection
+
+    if(lCondition) then
+      iDirection = RIGHT
+    else
+      iDirection = LEFT
+    endif
+
+
+  end function get_direction
+
+!------------------------------------------------------------------------------
+
+  !! This function sets the color of the specified node, if it exists.
+  subroutine set_node_color(pNode, iNodecolor)
+    !! INCOMING: Node_Ptr = a pointer to the node whose color is to be set.
+    type (T_NODE), pointer    :: pNode
+    integer (kind=T_INT) :: iNodeColor
+
+    if (associated (pNode)) then
+      pNode%iColor = iNodecolor
+    endif
+
+   end subroutine set_node_color
 
 !------------------------------------------------------------------------------
 
@@ -909,7 +1280,7 @@ function get_node_color(pNode) result (iNodeColor)
 
     ! [ LOCALS ]
     type(T_NODE), pointer :: pParentOfCurrent => null()
-    type(T_NODE), pointer :: pNewNode => null()
+    type(T_NODE), pointer :: pNewNode
 
     ! set root and current pointer to root
     this%pCurrent => this%pRoot
@@ -943,53 +1314,55 @@ function get_node_color(pNode) result (iNodeColor)
       endif
     endif
 
-    ! find a place in the tree to graft the new node to;
-    ! travel from root to a node containing a null pointer
-    do
+    call insert_top_down_sub(this, pNewNode)
 
-      if(.not. associated(this%pCurrent) ) exit
+!     ! find a place in the tree to graft the new node to;
+!     ! travel from root to a node containing a null pointer
+!     do
+!
+!       if(.not. associated(this%pCurrent) ) exit
+!
+!       pParentOfCurrent => this%pCurrent
+!
+!       ! if current node name > NEW node name, take LEFT path
+!       if( LGT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
+!         this%pCurrent => this%pCurrent%pLeft
+!
+!       ! if current node name < NEW node name, take RIGHT path
+!       elseif( LLT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
+!         this%pCurrent => this%pCurrent%pRight
+!
+!       else
+!         call assert(lFALSE,"Series name "//quote(pNewNode%sNodeName) &
+!           //" has already been used. ", &
+!           trim(__FILE__),__LINE__)
+!         exit
+!       endif
+!
+!     enddo
+!     ! upon exit, we have found a node whose left or right pointer field is null
+!     ! pCurrent is NULL at this point as well
+!
+!     pNewNode%pParent => pParentOfCurrent
+!     pNewNode%iColor = RED
+!
+!     if(.not. associated(pParentOfCurrent) ) then  ! we're at the root; color it BLACK
+!       pNewNode%iColor = BLACK
+!       this%pRoot => pNewNode
+!     elseif( LLT(pNewNode%sNodeName,pParentOfCurrent%sNodeName) ) then
+!       pParentOfCurrent%pLeft => pNewNode
+!     else
+!       pParentOfCurrent%pRight => pNewNode
+!     endif
+!
+!     ! update global pointer to new node
+!     this%pCurrent => pNewNode
+!     nullify(pNewNode)
 
-      pParentOfCurrent => this%pCurrent
-
-      ! if current node name > NEW node name, take LEFT path
-      if( LGT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
-        this%pCurrent => this%pCurrent%pLeft
-
-      ! if current node name < NEW node name, take RIGHT path
-      elseif( LLT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
-        this%pCurrent => this%pCurrent%pRight
-
-      else
-        call assert(lFALSE,"Series name "//quote(pNewNode%sNodeName) &
-          //" has already been used. ", &
-          trim(__FILE__),__LINE__)
-        exit
-      endif
-
-    enddo
-    ! upon exit, we have found a node whose left or right pointer field is null
-    ! pCurrent is NULL at this point as well
-
-    pNewNode%pParent => pParentOfCurrent
-    pNewNode%iColor = RED
-
-    if(.not. associated(pParentOfCurrent) ) then  ! we're at the root; color it BLACK
-      pNewNode%iColor = BLACK
-      this%pRoot => pNewNode
-    elseif( LLT(pNewNode%sNodeName,pParentOfCurrent%sNodeName) ) then
-      pParentOfCurrent%pLeft => pNewNode
-    else
-      pParentOfCurrent%pRight => pNewNode
-    endif
-
-    ! update global pointer to new node
-    this%pCurrent => pNewNode
-    nullify(pNewNode)
-
-    call this%makeDot()
+!    call this%makeDot()
 
     ! must rebalance tree following an addition
-    call this%rebalanceTree()
+!    call this%rebalanceTree()
 
     call this%makeDot()
 
@@ -1723,7 +2096,13 @@ function get_node_color(pNode) result (iNodeColor)
     type (T_NODE), pointer :: pNode
 
     pNode => this%getNode(sSeriesName)
-    pTS => pNode%pTS
+
+    if(associated(pNode%pTS) then
+      pTS => pNode%pTS
+    else
+       call assert(lFALSE, "Failed to find the series named "//quote(sSeriesName), &
+        trim(__FILE__), __LINE__)
+    endif
 
     nullify(pNode)
 
@@ -1791,7 +2170,13 @@ function get_node_color(pNode) result (iNodeColor)
     type (T_NODE), pointer :: pNode
 
     pNode => this%getNode(sSeriesName)
-    pTable => pNode%pTable
+
+    if(associated(pNode%pTable) then
+      pTable => pNode%pTable
+    else
+      call assert(lFALSE, "Failed to find the table named "//quote(sSeriesName), &
+        trim(__FILE__), __LINE__)
+    endif
 
   end function get_table_pointer_node_fn
 

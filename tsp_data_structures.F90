@@ -1,6 +1,3 @@
-!     Last change:  J     9 Sep 2004    5:38 pm
-!#define __FILE__
-!#define __LINE__ 999
 module tsp_data_structures
 
   implicit none
