@@ -68,8 +68,10 @@ module tsp_collections
 !    generic :: add => add_ts_link_sub, add_table_link_sub
     procedure :: clear => remove_all_sub
     procedure :: calculate => calc_values_from_equation_fn
+    procedure :: deallocate => deallocate_node_and_contents_sub
     procedure :: newTimeBase => conform_ts_sub
-    procedure :: removeNode => delete_node_from_tree_sub
+!    procedure :: removeNode => delete_node_from_tree_sub
+    procedure :: removeNode => delete_top_down_sub
     procedure :: removeTS => remove_ts_link_sub
     procedure :: removeTable => remove_table_link_sub
     procedure, private :: deallocateNode => deallocate_node_and_contents_sub
@@ -98,6 +100,231 @@ module tsp_collections
   end type TIME_SERIES_COLLECTION
 
 contains
+
+!------------------------------------------------------------------------------
+
+subroutine delete_top_down_sub(this, sNodename)
+
+   class(TIME_SERIES_COLLECTION) :: this
+   character(len=*) :: sNodename
+
+   ! [ LOCALS ]
+   type (T_NODE), pointer        :: pFalseRoot
+   type (T_NODE), pointer        :: pG, pG_Link, pG_NotLink  ! pointers to grandparent
+   type (T_NODE), pointer        :: pP, pP_Link, pP_NotLink  ! pointers to parent
+   type (T_NODE), pointer        :: pQ, pQ_Link, pQ_NotLink  ! pointers to iterator
+   type (T_NODE), pointer        :: pS, pS_Link, pS_NotLink  ! general node pointer
+   type (T_NODE), pointer        :: pF          ! pointer to found item
+   type (T_NODE), pointer        :: pTemp   ! general temp pointer
+   integer (kind=T_INT) :: iDir, iLast, iDir2, iDir3, iDir4
+
+   ! initialize direction index
+   iDir = RIGHT; iDir2 = RIGHT
+
+   ! initialize dummy node
+   if(.not. associated(pFalseRoot) ) allocate(pFalseRoot)
+
+   print *, __LINE__
+
+   ! set up helpers
+   pQ => pFalseroot
+   pG => null(); pG_Link => null(); pG_NotLink => null()
+   pP => null(); pP_Link => null(); pP_NotLink => null()
+   pS => null(); pS_Link => null(); pS_NotLink => null()
+   pQ_Link => null(); pQ_NotLink => null()
+   pTemp => null()
+   pQ%pRight => this%pRoot
+
+   print *, __LINE__
+
+   do
+
+     pQ_Link => follow_link(pQ, iDir)
+
+     if(.not. associated(pQ_Link) ) exit
+
+     iLast = iDir
+     pG => pP
+     pP => pQ
+     pQ_NotLink => follow_link(pQ, flip_direction(iDir))
+
+   print *, __LINE__
+
+     ! update pQ by following left or right pointer link
+     pQ => pQ_Link
+     iDir = get_direction( LLT(pQ%sNodename, sNodename) )
+
+   print *, __LINE__
+     ! save found node
+     if( associated(pQ) ) then
+       if( str_compare(pQ%sNodename, sNodename) ) then
+            print *, __LINE__
+         pF => pQ
+       endif
+     endif
+
+     ! push red node down
+     if( get_node_color(pQ) == BLACK .and. get_node_color(pQ_Link) == BLACK ) then
+       if( get_node_color(pQ_NotLink) == RED ) then
+         select case (iLast)
+           case(LEFT)
+              print *, __LINE__
+             pP => node_single_rotation_fn(pQ, iDir)
+             pP%pLeft => node_single_rotation_fn(pQ, iDir)
+           case(RIGHT)
+              print *, __LINE__
+             pP => node_single_rotation_fn(pQ, iDir)
+             pP%pRight => node_single_rotation_fn(pQ, iDir)
+         end select
+
+       else if ( get_node_color(pQ_NotLink) == BLACK ) then
+         pS => follow_link(pQ, iLast)
+
+         if( associated(pS) ) then
+            print *, __LINE__
+           pS_Link => follow_link(pS, iLast)
+           pS_NotLink => follow_link(pS, flip_direction(iLast))
+              print *, __LINE__
+           if( get_node_color(pS_NotLink) == BLACK &
+              .and. get_node_color(pS_Link) == BLACK ) then
+             call set_node_color(pP, BLACK)
+             call set_node_color(pS, RED)
+             call set_node_color(pQ, RED)
+           else
+             iDir2 = get_direction(associated(get_right_pointer(pG), pP) )
+             if(get_node_color(pP_Link) == RED ) then
+               select case(iDir2)
+                 case(LEFT)
+                    print *, __LINE__
+                   if( get_node_color(pS_Link) == RED ) then
+                     pG%pLeft => node_double_rotation_fn(pP, iLast)
+                   elseif( get_node_color(pS_NotLink) == RED ) then
+                     pG%pLeft => node_single_rotation_fn(pP, iLast)
+                   endif
+
+                 case(RIGHT)
+                    print *, __LINE__
+                   if( get_node_color(pS_Link) == RED ) then
+                     pG%pRight => node_double_rotation_fn(pP, iLast)
+                   elseif( get_node_color(pS_NotLink) == RED ) then
+                     pG%pRight => node_single_rotation_fn(pP, iLast)
+                   endif
+               end select
+             endif
+
+             select case(iDir2)
+               case(LEFT)
+                  print *, __LINE__
+                 call set_node_color(pQ, RED)
+                  print *, __LINE__
+                 if (associated(pG) ) then
+                   call set_node_color(pG%pLeft, RED)
+                   if(associated(pG%pLeft) ) then
+                     call set_node_color(pG%pLeft%pLeft, BLACK)
+                     call set_node_color(pG%pLeft%pRight, BLACK)
+                   endif
+                 endif
+               case(RIGHT)
+                 call set_node_color(pQ, RED)
+                 if(associated(pG) ) then
+                   call set_node_color(pG%pRight, RED)
+                   if(associated(pG%pRight) ) then
+                     call set_node_color(pG%pRight%pLeft, BLACK)
+                     call set_node_color(pG%pRight%pRight, BLACK)
+                   endif
+                 endif
+             end select
+           endif
+         endif
+       endif
+     endif
+
+   enddo
+
+   ! Replace and remove, if found
+   if( associated(pF) ) then
+      print *, __LINE__
+     pF%sNodename = pQ%sNodeName
+     iDir3 = get_direction(associated(pP%pRight, pQ) )
+     iDir4 = get_direction(.not. associated(pQ%pLeft) )
+
+     select case(iDir3)
+
+       case(LEFT)
+   print *, __LINE__
+         pP%pLeft => follow_link(pQ, iDir4)
+
+       case(RIGHT)
+   print *, __LINE__
+         pP%pRight => follow_link(pQ, iDir4)
+
+       case default
+
+         call assert(lFALSE, "Logic error in case select", trim(__FILE__),__LINE__)
+
+     end select
+!
+!     ! set the node pointer pTS to the series to be added
+!      if(associated(pQ%pTS) ) then
+!        this%iNumTimeSeries = this%iNumTimeSeries - 1
+!        call echolog("  Deleted: "//trim(pQ%pTS%sDescription)//".")
+!        call echolog("    [ date range: "//pQ%pTS%tStartDate%listdate()//" to " &
+!           //pQ%pTS%tEndDate%listdate()//" ]")
+!        call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
+!        call echolog("")
+!      endif
+!
+!      if(associated(pQ%pTable) ) then
+!        this%iNumTables = this%iNumTables - 1
+!        call echolog("  Deleted: "//trim(pQ%pTable%sDescription)//".")
+!        call echolog("    [ date range: "//pQ%pTable%tStartDate%listdate()//" to " &
+!           //pQ%pTable%tEndDate%listdate()//" ]")
+!        call echolog("    [There are now "//trim(asChar(this%iNumTables))//" tables in memory.]")
+!        call echolog("")
+!      endif
+!
+!     deallocate(pQ)
+     call this%deallocate(pQ)
+
+   endif
+
+   ! update root and make it black
+   this%pRoot => pFalseRoot%pRight
+   call set_node_color(this%pRoot, BLACK)
+
+   call this%makeDot()
+
+end subroutine delete_top_down_sub
+
+!------------------------------------------------------------------------------
+
+function follow_link(pNode, iDirection)   result(pLink)
+
+  type (T_NODE), pointer :: pNode
+  integer (kind=T_INT) :: iDirection
+  type (T_NODE), pointer :: pLink
+
+  if (associated(pNode) ) then
+
+    select case(iDirection)
+
+      case(LEFT)
+        pLink => pNode%pLeft
+      case(RIGHT)
+        pLink => pNode%pRight
+      case default
+        call assert(lFALSE, "Logic error following link", trim(__FILE__),__LINE__)
+    end select
+
+  else
+
+    pLink => null()
+
+  endif
+
+end function follow_link
+
+!------------------------------------------------------------------------------
 
 subroutine insert_top_down_sub(this, pNewNode)
 
@@ -139,7 +366,7 @@ subroutine insert_top_down_sub(this, pNewNode)
          pQ => pNewNode
 
 
-         if(associated(pP) )  then
+         if(associated(pQ) )  then
 
            select case (iDir)
 
@@ -181,13 +408,13 @@ subroutine insert_top_down_sub(this, pNewNode)
                end select
 
              else
-               print *, "last = LEFT; dir2=LEFT; pQ unassoc w pP%pLeft"
+
                select case(iDir2)
                  case(LEFT)
 
                    pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
                  case(RIGHT)
-                 print *, "last = LEFT; dir2=RIGHT; pQ unassoc w pP%pLeft"
+
                    pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
                end select
 
@@ -199,20 +426,20 @@ subroutine insert_top_down_sub(this, pNewNode)
                select case(iDir2)
 
                  case(LEFT)
-                 print *, "last = RIGHT; dir2=LEFT"
+
                    pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
                  case(RIGHT)
-                 print *, "last = RIGHT; dir2=RIGHT"
+
                    pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
                end select
 
              else
                select case(iDir2)
                  case(LEFT)
-                 print *, "last = RIGHT; dir2=LEFT; pQ unassoc w pP"
+
                    pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
                  case(RIGHT)
-                 print *, "last = RIGHT; dir2=RIGHT; pQ unassoc w pP"
+
                    pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
                end select
              endif
@@ -311,36 +538,6 @@ end function node_single_rotation_fn
 
 !------------------------------------------------------------------------------
 
-subroutine pointer_status(iLine, pQ, pT, pG, pP)
-
-   integer (kind=T_INT) :: iLIne
-   type (T_NODE), pointer        :: pG, pT      ! pointers to grandparent and parent
-   type (T_NODE), pointer        :: pP, pQ      ! pointers to parent and iterator
-
-
-  print *, "Line: ",iLine
-
-  print *, "pQ: ", associated(pQ)
-  print *, "pQ%pLeft: ", associated(get_left_pointer(pQ))
-  print *, "pQ%pRight: ", associated(get_right_pointer(pQ))
-
-  print *, "pP: ", associated(pP)
-  print *, "pP%pLeft: ", associated(get_left_pointer(pP))
-  print *, "pP%pRight: ", associated(get_right_pointer(pP))
-
-  print *, "pG: ", associated(pG)
-  print *, "pG%pLeft: ", associated(get_left_pointer(pG))
-  print *, "pG%pRight: ", associated(get_right_pointer(pG))
-
-  print *, "pT: ", associated(pT)
-  print *, "pT%pLeft: ", associated(get_left_pointer(pT))
-  print *, "pT%pRight: ", associated(get_right_pointer(pT))
-  print *
-
-
-end subroutine pointer_status
-
-
 function node_double_rotation_fn(pPivot, iDirection)    result(pSave)
 
   type (T_NODE), pointer :: pPivot
@@ -403,15 +600,15 @@ subroutine make_dot(this)
 
   integer (kind=T_INT) :: LU_DOT
   integer (kind=T_INT) :: iNullCount
-  character(len=24) :: sDateStr, sDateStrPretty
-  character(len=256) :: sFilenamePrefix
+  character(len=24) :: sDateStr, sDateStrQretty
+  character(len=256) :: sFilenameQrefix
   character(len=256) :: sCommandLineText
 
   iNullCount = 0
-  call GetSysTimeDate(sDateStr,sDateStrPretty)
-  sFilenamePrefix = trim("tsproc_tree_structure_"//trim(adjustl(sDateStr)))
+  call GetSysTimeDate(sDateStr,sDateStrQretty)
+  sFilenameQrefix = trim("tsproc_tree_structure_"//trim(adjustl(sDateStr)))
 
-  open(unit=newunit(LU_DOT), file=trim(sFilenamePrefix)//".dot", status = 'REPLACE')
+  open(unit=newunit(LU_DOT), file=trim(sFilenameQrefix)//".dot", status = 'REPLACE')
   write(LU_DOT, fmt="(a)") 'digraph BST {'
   write(LU_DOT, fmt="(a)") 'size="84.0,12.0";'
   write(LU_DOT, fmt="(a)") 'ratio="fill";'
@@ -450,9 +647,9 @@ subroutine make_dot(this)
   flush(LU_DOT)
   close(LU_DOT)
 
-  ! issue command line directive to make a *.PDF from the *.dot file
-  sCommandLineText = "dot -Tpdf "//trim(sFilenamePrefix)//".dot" &
-    //" -o "//trim(sFilenamePrefix)//".pdf"
+  ! issue command line directive to make a *.QDF from the *.dot file
+  sCommandLineText = "dot -Tpdf "//trim(sFilenameQrefix)//".dot" &
+    //" -o "//trim(sFilenameQrefix)//".pdf"
   call system(trim(sCommandLineText) )
 
 contains
@@ -592,17 +789,17 @@ end subroutine traverse_tree_summarize_table_sub
 
 !! This function procedure searches a binary search tree for the given element KEY.  It
 !! returns the location of the element, or a null pointer if the element could not be found.
-function find_node_in_tree_fn (this,sNodeName)   result (pPosition)
-   !! INCOMING:   Key    = the given value to be matched with an element of the tree.
+function find_node_in_tree_fn (this,sNodeName)   result (pQosition)
+   !! INCOMINQ:   Key    = the given value to be matched with an element of the tree.
    !!       Root  = a pointer to the root of the tree to be searched.
    !! RETURNS: A pointer to the element (if Key is found in the tree), or a null pointer (if not found)
 
    class(TIME_SERIES_COLLECTION) :: this
    character (len=*), intent(in)   :: sNodeName
-   type (T_NODE), pointer          :: pPosition
+   type (T_NODE), pointer          :: pQosition
 
    this%pCurrent => this%pRoot
-   nullify(pPosition)
+   nullify(pQosition)
 
    do
       if (.not. associated(this%pCurrent ) ) then
@@ -616,13 +813,13 @@ function find_node_in_tree_fn (this,sNodeName)   result (pPosition)
       print *, quote(this%pCurrent%sNodeName)//" (tree) < (target) ",quote(sNodeName)
          this%pCurrent => this%pCurrent%pRight
       else                                        !! The desired element was found.
-         pPosition => this%pCurrent
+         pQosition => this%pCurrent
       print *, quote(this%pCurrent%sNodeName)//" (tree) == (target) ",quote(sNodeName)
          return
       end  if
    end  do
 
-   nullify (pPosition)                             !! The element did not exist in the tree.
+   nullify (pQosition)                             !! The element did not exist in the tree.
    call assert(lFALSE,"Failed to find series "//quote(sNodeName)//" in tree structure.", &
      trim(__FILE__), __LINE__)
 
@@ -646,7 +843,7 @@ end function find_node_in_tree_fn
 !! Rule 4. Every direct path from the root to a leaf contains the same number of black nodes.
 
   subroutine rebalance_tree_after_insert_sub(this)
-      !! INCOMING: pCurrent = a pointer to a (red) node that has been inserted in the tree.
+      !! INCOMINQ: pCurrent = a pointer to a (red) node that has been inserted in the tree.
       class(TIME_SERIES_COLLECTION) :: this
 
       ! [ LOCALS ]
@@ -666,7 +863,7 @@ end function find_node_in_tree_fn
          if (lIterating) lIterating = (pX%iColor == RED)
          !! There must be a parent . . . .
          if (lIterating) lIterating = associated(pX%pParent)
-         !! Parent must must be red . . . .
+         !! Qarent must must be red . . . .
          if (lIterating) lIterating = (pX%pParent%iColor == RED)
          !! . . . and there must be a grandparent.
          if (lIterating) lIterating = associated (pX%pParent%pParent)
@@ -678,7 +875,7 @@ end function find_node_in_tree_fn
          !! If true, the parent is a left node of pX's grandparent.
          if (associated (pX%pParent, pX%pParent%pParent%pLeft) ) then
 
-            !! Get the address of the uncle.
+            !! Qet the address of the uncle.
             pY => pX%pParent%pParent%pRight
             ! test to make sure uncle isn't a null pointer, and that uncle is RED
             lRedUncle = associated(pY)
@@ -710,7 +907,7 @@ end function find_node_in_tree_fn
          !! This segment is the mirror image of the code for the "then" part,
          !! with the words Right and Left interchanged.
          else  !! The parent is a right node of pX's grandparent.
-            !! Get the address of the uncle.
+            !! Qet the address of the uncle.
             pY => pX%pParent%pParent%pLeft
             lRedUncle = associated(pY)
             if (lRedUncle) lRedUncle = (pY%iColor == RED)
@@ -754,7 +951,7 @@ end function find_node_in_tree_fn
 !! has no children.
 !! The fourth section deals with the case where the node to be deleted has one child.
   subroutine  delete_node_from_tree_sub(this, sNodename)
-      !! INCOMING: pTarget points at the node to be deleted.
+      !! INCOMINQ: pTarget points at the node to be deleted.
       class(TIME_SERIES_COLLECTION) :: this
       character (len=*), intent(in) :: sNodename
 
@@ -822,7 +1019,7 @@ end function find_node_in_tree_fn
       if (.not. associated (pX%pParent) ) then      !! Node pX is the root.
          this%pRoot => pChild                            !! pX's only child becomes the root.
          call this%deallocateNode(pX)
-!         deallocate (pX)                           !! Get rid of pX.
+!         deallocate (pX)                           !! Qet rid of pX.
          nullify (this%pRoot%pParent)                    !! The root can't have a parent.
          this%pRoot%iColor = Black                       !! Color it black . . .
          return                                   !! . . . and quit.
@@ -897,15 +1094,15 @@ end function find_node_in_tree_fn
 !! This routine is entered when the deleted node was black.  (Node X is the child of the
 !! deleted node).
 !! The crux is to balance the two subtrees whose roots are node X and its brother.
-!! General strategy:
+!! Qeneral strategy:
 !! (1) Simple case: If the child of the deleted node is red, change it to black and finish.
-!! (2) General case:  Either:
-!! (2a) Perform a rotation about the parent, so as to bring a node into the subtree, to
+!! (2) Qeneral case:  Either:
+!! (2a) Qerform a rotation about the parent, so as to bring a node into the subtree, to
 !!      compensate for the deleted node.  In this case, color the new node black and finish.
 !! (2b) Change a node of the sibling's subtree from black to red, and move up the tree.
 !!       In this event, repeat step (2).
   subroutine restructure_tree_after_deletion_sub(this, pTarget)
-      !! INCOMING: Current = points at the child of the deleted node.
+      !! INCOMINQ: Current = points at the child of the deleted node.
       class(TIME_SERIES_COLLECTION) :: this
       type (T_NODE), pointer :: pTarget
 
@@ -914,7 +1111,7 @@ end function find_node_in_tree_fn
 
       pX => pTarget
 
-TREE_CLIMBING_LOOP:                 &
+TREE_CLIMBINQ_LOOQ:                 &
       do
          if ( associated(pX, this%pRoot) .or. (pX%iColor == RED)) then
             exit                                  !! Quit when we are at the root, or if the node is red.
@@ -953,7 +1150,7 @@ TREE_CLIMBING_LOOP:                 &
                pBrother%pRight%iColor = BLACK
                call  this%rotateLeft(pX%pParent)       !! Brings a black node to the left
                                                                                 !! subtree; pLeft & pRight subtrees are balanced.
-               exit TREE_CLIMBING_LOOP            !! Quit, rebalancing is complete.
+               exit TREE_CLIMBINQ_LOOQ            !! Quit, rebalancing is complete.
             end  if
          else                                     !! Node pX is a right child.
             !! Same as the THEN clause, with "pRight" and "pLeft" interchanged.
@@ -989,11 +1186,11 @@ TREE_CLIMBING_LOOP:                 &
                pBrother%pLeft%iColor = BLACK
                call this%rotateRight(pX%pParent)      !! Brings a black node to the right
                                                                                 !! subtree; pLeft & pRight subtrees are balanced.
-               exit TREE_CLIMBING_LOOP            !! Quit, rebalancing is complete.
+               exit TREE_CLIMBINQ_LOOQ            !! Quit, rebalancing is complete.
             end  if
          end  if
 
-      end  do  TREE_CLIMBING_LOOP
+      end  do  TREE_CLIMBINQ_LOOQ
 
       pX%iColor = BLACK                             !! Having encountered a red node, color it black and quit.
 
@@ -1041,7 +1238,7 @@ TREE_CLIMBING_LOOP:                 &
 
   !! This function returns the color of the specified node, or black if the node does not exist.
   function get_node_color(pNode) result (iNodeColor)
-    !! INCOMING: Node_Ptr = a pointer to the node whose color is to be obtained.
+    !! INCOMINQ: Node_Qtr = a pointer to the node whose color is to be obtained.
     type (T_NODE), pointer            :: pNode
     integer (kind=T_INT) :: iNodeColor
 
@@ -1089,7 +1286,7 @@ TREE_CLIMBING_LOOP:                 &
 
   !! This function sets the color of the specified node, if it exists.
   subroutine set_node_color(pNode, iNodecolor)
-    !! INCOMING: Node_Ptr = a pointer to the node whose color is to be set.
+    !! INCOMINQ: Node_Qtr = a pointer to the node whose color is to be set.
     type (T_NODE), pointer    :: pNode
     integer (kind=T_INT) :: iNodeColor
 
@@ -1677,10 +1874,10 @@ TREE_CLIMBING_LOOP:                 &
           pNext => pCurrent%pNext
           if(associated(pNext)) pNext%pPrevious => pCurrent%pPrevious
           deallocate(pCurrent%tData, stat=iStat)
-          call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
+          call Assert(iStat==0, "Qroblem deallocating memory while removing a time series", &
             trim(__FILE__), __LINE__)
           deallocate(pCurrent, stat=iStat)
-          call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
+          call Assert(iStat==0, "Qroblem deallocating memory while removing a time series", &
             trim(__FILE__), __LINE__)
 
           lMatch = lTRUE
@@ -1759,10 +1956,10 @@ TREE_CLIMBING_LOOP:                 &
           pNext => pCurrent%pNext
           if(associated(pNext)) pNext%pPrevious => pCurrent%pPrevious
           deallocate(pCurrent%tTableData, stat=iStat)
-          call Assert(iStat==0, "Problem deallocating memory while removing a table", &
+          call Assert(iStat==0, "Qroblem deallocating memory while removing a table", &
             trim(__FILE__), __LINE__)
           deallocate(pCurrent, stat=iStat)
-          call Assert(iStat==0, "Problem deallocating memory while removing a table", &
+          call Assert(iStat==0, "Qroblem deallocating memory while removing a table", &
             trim(__FILE__), __LINE__)
 
           lMatch = lTRUE
@@ -2097,7 +2294,7 @@ TREE_CLIMBING_LOOP:                 &
 
     pNode => this%getNode(sSeriesName)
 
-    if(associated(pNode%pTS) then
+    if(associated(pNode%pTS) ) then
       pTS => pNode%pTS
     else
        call assert(lFALSE, "Failed to find the series named "//quote(sSeriesName), &
@@ -2171,7 +2368,7 @@ TREE_CLIMBING_LOOP:                 &
 
     pNode => this%getNode(sSeriesName)
 
-    if(associated(pNode%pTable) then
+    if(associated(pNode%pTable) ) then
       pTable => pNode%pTable
     else
       call assert(lFALSE, "Failed to find the table named "//quote(sSeriesName), &
@@ -2322,12 +2519,12 @@ TREE_CLIMBING_LOOP:                 &
     type (T_TABLE), pointer :: pModeledTable => null()
     type (T_TABLE), pointer :: pCurrentTable => null()
 
-    write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE OBJECTS CURRENTLY IN MEMORY ***'
+    write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSQROC TIME SERIES and TABLE OBJECTS CURRENTLY IN MEMORY ***'
 
     if(this%iNumTimeSeries > 0) then
       pCurrent => this%pRoot
       write(LU_STD_OUT, &
-        fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
+        fmt="('SERIES_NAME',t24,'DATE RANQE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
              t80,'MAX',t86,'MEMORY(kb)',/)")
       call this%summarizeSeries(pCurrent)
     else
@@ -2409,7 +2606,7 @@ TREE_CLIMBING_LOOP:                 &
 !       iCount = size(this%tTable)
 !
 !       write(LU_STD_OUT, &
-!         fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
+!         fmt="(/,'SERIES_NAME',t24,'DATE RANQE',t45,'TABLE TYQE',/)")
 !
 !
 !       do i=1,iCount
@@ -2432,7 +2629,7 @@ TREE_CLIMBING_LOOP:                 &
     if(this%iNumTables > 0) then
       pCurrent => this%pRoot
       write(LU_STD_OUT, &
-        fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
+        fmt="(/,'SERIES_NAME',t24,'DATE RANQE',t45,'TABLE TYQE',/)")
       call this%summarizeTable(pCurrent)
     else
       write(LU_STD_OUT,fmt="(/,a,/)") '     ===> No TABLE objects currently in memory <==='
@@ -2447,7 +2644,7 @@ TREE_CLIMBING_LOOP:                 &
 !
 !
 !       write(LU_STD_OUT, &
-!         fmt="(/,'SERIES_NAME',t24,'DATE RANGE',t45,'TABLE TYPE',/)")
+!         fmt="(/,'SERIES_NAME',t24,'DATE RANQE',t45,'TABLE TYQE',/)")
 !
 !
 !       pCurrentTable => this%pTable_Head
@@ -2480,14 +2677,14 @@ TREE_CLIMBING_LOOP:                 &
 !     endif
 
 
-    write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE COMPARISON OBJECTS CURRENTLY IN MEMORY ***'
+    write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSQROC TIME SERIES and TABLE COMQARISON OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
-      fmt="(/,'OBSERVED SERIES',t19,'MODELED SERIES',t38,'DATE RANGE',t60,'COUNT'," &
+      fmt="(/,'OBSERVED SERIES',t19,'MODELED SERIES',t38,'DATE RANQE',t60,'COUNT'," &
          //"t76,'RESIDUAL',/)")
 
     if(.not. allocated(this%tTSComparison)) then
       write(LU_STD_OUT,fmt="(a)") &
-        '     ===> No TIME SERIES COMPARISON objects currently in memory <==='
+        '     ===> No TIME SERIES COMQARISON objects currently in memory <==='
 
     else
 
@@ -2518,11 +2715,11 @@ TREE_CLIMBING_LOOP:                 &
     endif
 
     write(LU_STD_OUT, &
-      fmt="(/,'OBSERVED TABLE',t19,'MODELED TABLE',t38,'DATE RANGE',t60,'COUNT'," &
+      fmt="(/,'OBSERVED TABLE',t19,'MODELED TABLE',t38,'DATE RANQE',t60,'COUNT'," &
          //"t76,'RESIDUAL',/)")
     if(.not. allocated(this%tTableComparison)) then
       write(LU_STD_OUT,fmt="(a,/)") &
-        '     ===> No TABLE COMPARISON objects currently in memory <==='
+        '     ===> No TABLE COMQARISON objects currently in memory <==='
 
     else
 
@@ -2593,7 +2790,7 @@ TREE_CLIMBING_LOOP:                 &
 
     if(allocated(pTS%tData)) then
     write(LU_STD_OUT, &
-      fmt="('SERIES_NAME',t24,'DATE RANGE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
+      fmt="('SERIES_NAME',t24,'DATE RANQE',t45,'COUNT',t58,'MIN',t68,'MEAN', &
            t80,'MAX',t86,'MEMORY(kb)')")
       iMemoryInBytes = sizeof(pTS) + sizeof(pTS%tData)
       write(LU_STD_OUT,fmt="(a18,a10,'-',a10,i10, f11.2,f11.2,f11.2,3x,i6,'k',/)") &
@@ -2815,19 +3012,19 @@ TREE_CLIMBING_LOOP:                 &
        trim(__FILE__), __LINE__)
 
 !    allocate(pTempSeries, stat=iStat)
-!    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+!    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
 !      trim(__FILE__), __LINE__)
 !
 !    allocate(pTempSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
-!    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+!    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
 !      trim(__FILE__), __LINE__)
 
     allocate(pNewSeries, stat=iStat)
-    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(pNewSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
-    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     pNewSeries%sSeriesname = sNewName
@@ -2835,19 +3032,19 @@ TREE_CLIMBING_LOOP:                 &
       //"interpolated to the datetimes found in series "//trim(pTimeBaseTS%sSeriesName)
 
     allocate(rX1(size(pTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(rY1(size(pTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(rX2(size(pTimeBaseTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(rY2(size(pTimeBaseTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     ! we're subtracting this (large) value so that we can get away with using
@@ -3218,7 +3415,7 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
   type (T_TIME_SERIES), pointer :: pTS
   real (kind=T_SGL), dimension(:), allocatable :: rTempValue
   integer (kind=T_INT) :: iNumSeries
-  character (len=256) :: sPreviousSeriesName
+  character (len=256) :: sQreviousSeriesName
 
   iNumFields = countFields(trim(sFuncTxt),OPERATORS//" ")
 
@@ -3241,10 +3438,10 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
       call TSCOL%insert( pNewSeries=pTS )
       lInclude(i) = lTRUE
       if(iNumSeries>1) then
-        lConsistentTimebase = this%datesEqual(sPreviousSeriesName, sVarTxt(i) )
+        lConsistentTimebase = this%datesEqual(sQreviousSeriesName, sVarTxt(i) )
         if(.not. lConsistentTimebase) exit
       endif
-      sPreviousSeriesName = sVarTxt(i)
+      sQreviousSeriesName = sVarTxt(i)
     endif
   enddo
 
