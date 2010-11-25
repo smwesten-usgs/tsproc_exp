@@ -124,18 +124,16 @@ subroutine delete_top_down_sub(this, sNodename)
    ! initialize dummy node
    if(.not. associated(pFalseRoot) ) allocate(pFalseRoot)
 
-   print *, __LINE__
+
 
    ! set up helpers
    pQ => pFalseroot
    pG => null(); pG_Link => null(); pG_NotLink => null()
-   pP => null(); pP_Link => null(); pP_NotLink => null()
+   pP => null()
    pS => null(); pS_Link => null(); pS_NotLink => null()
    pQ_Link => null(); pQ_NotLink => null()
    pTemp => null()
    pQ%pRight => this%pRoot
-
-   print *, __LINE__
 
    do
 
@@ -143,22 +141,20 @@ subroutine delete_top_down_sub(this, sNodename)
 
      if(.not. associated(pQ_Link) ) exit
 
+     ! update helpers
      iLast = iDir
      pG => pP
      pP => pQ
      pQ_NotLink => follow_link(pQ, flip_direction(iDir))
 
-   print *, __LINE__
-
      ! update pQ by following left or right pointer link
      pQ => pQ_Link
      iDir = get_direction( LLT(pQ%sNodename, sNodename) )
 
-   print *, __LINE__
      ! save found node
      if( associated(pQ) ) then
        if( str_compare(pQ%sNodename, sNodename) ) then
-            print *, __LINE__
+
          pF => pQ
        endif
      endif
@@ -168,23 +164,26 @@ subroutine delete_top_down_sub(this, sNodename)
        if( get_node_color(pQ_NotLink) == RED ) then
          select case (iLast)
            case(LEFT)
-              print *, __LINE__
+
              pP => node_single_rotation_fn(pQ, iDir)
-             pP%pLeft => node_single_rotation_fn(pQ, iDir)
+!             pP%pLeft => node_single_rotation_fn(pQ, iDir)
+             pP%pLeft => pP
            case(RIGHT)
-              print *, __LINE__
+
              pP => node_single_rotation_fn(pQ, iDir)
-             pP%pRight => node_single_rotation_fn(pQ, iDir)
+!             pP%pRight => node_single_rotation_fn(pQ, iDir)
+             pP%pRight => pP
          end select
 
        else if ( get_node_color(pQ_NotLink) == BLACK ) then
-         pS => follow_link(pQ, iLast)
+!         pS => follow_link(pQ, iLast)
+         pS => follow_link(pP, flip_direction(iLast) )
 
          if( associated(pS) ) then
-            print *, __LINE__
+
            pS_Link => follow_link(pS, iLast)
            pS_NotLink => follow_link(pS, flip_direction(iLast))
-              print *, __LINE__
+
            if( get_node_color(pS_NotLink) == BLACK &
               .and. get_node_color(pS_Link) == BLACK ) then
              call set_node_color(pP, BLACK)
@@ -192,31 +191,31 @@ subroutine delete_top_down_sub(this, sNodename)
              call set_node_color(pQ, RED)
            else
              iDir2 = get_direction(associated(get_right_pointer(pG), pP) )
-             if(get_node_color(pP_Link) == RED ) then
-               select case(iDir2)
-                 case(LEFT)
-                    print *, __LINE__
-                   if( get_node_color(pS_Link) == RED ) then
-                     pG%pLeft => node_double_rotation_fn(pP, iLast)
-                   elseif( get_node_color(pS_NotLink) == RED ) then
-                     pG%pLeft => node_single_rotation_fn(pP, iLast)
-                   endif
-
-                 case(RIGHT)
-                    print *, __LINE__
-                   if( get_node_color(pS_Link) == RED ) then
-                     pG%pRight => node_double_rotation_fn(pP, iLast)
-                   elseif( get_node_color(pS_NotLink) == RED ) then
-                     pG%pRight => node_single_rotation_fn(pP, iLast)
-                   endif
-               end select
-             endif
-
+!             if(get_node_color(pP_Link) == RED ) then
              select case(iDir2)
                case(LEFT)
-                  print *, __LINE__
+
+                 if( get_node_color(pS_Link) == RED ) then
+                   pG%pLeft => node_double_rotation_fn(pP, iLast)
+                 elseif( get_node_color(pS_NotLink) == RED ) then
+                   pG%pLeft => node_single_rotation_fn(pP, iLast)
+                 endif
+
+               case(RIGHT)
+
+                 if( get_node_color(pS_Link) == RED ) then
+                   pG%pRight => node_double_rotation_fn(pP, iLast)
+                 elseif( get_node_color(pS_NotLink) == RED ) then
+                   pG%pRight => node_single_rotation_fn(pP, iLast)
+                 endif
+             end select
+
+             ! ensure correct node coloring
+             select case(iDir2)
+               case(LEFT)
+
                  call set_node_color(pQ, RED)
-                  print *, __LINE__
+
                  if (associated(pG) ) then
                    call set_node_color(pG%pLeft, RED)
                    if(associated(pG%pLeft) ) then
@@ -243,7 +242,7 @@ subroutine delete_top_down_sub(this, sNodename)
 
    ! Replace and remove, if found
    if( associated(pF) ) then
-      print *, __LINE__
+
      pF%sNodename = pQ%sNodeName
      iDir3 = get_direction(associated(pP%pRight, pQ) )
      iDir4 = get_direction(.not. associated(pQ%pLeft) )
@@ -251,11 +250,11 @@ subroutine delete_top_down_sub(this, sNodename)
      select case(iDir3)
 
        case(LEFT)
-   print *, __LINE__
+
          pP%pLeft => follow_link(pQ, iDir4)
 
        case(RIGHT)
-   print *, __LINE__
+
          pP%pRight => follow_link(pQ, iDir4)
 
        case default
@@ -263,27 +262,7 @@ subroutine delete_top_down_sub(this, sNodename)
          call assert(lFALSE, "Logic error in case select", trim(__FILE__),__LINE__)
 
      end select
-!
-!     ! set the node pointer pTS to the series to be added
-!      if(associated(pQ%pTS) ) then
-!        this%iNumTimeSeries = this%iNumTimeSeries - 1
-!        call echolog("  Deleted: "//trim(pQ%pTS%sDescription)//".")
-!        call echolog("    [ date range: "//pQ%pTS%tStartDate%listdate()//" to " &
-!           //pQ%pTS%tEndDate%listdate()//" ]")
-!        call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
-!        call echolog("")
-!      endif
-!
-!      if(associated(pQ%pTable) ) then
-!        this%iNumTables = this%iNumTables - 1
-!        call echolog("  Deleted: "//trim(pQ%pTable%sDescription)//".")
-!        call echolog("    [ date range: "//pQ%pTable%tStartDate%listdate()//" to " &
-!           //pQ%pTable%tEndDate%listdate()//" ]")
-!        call echolog("    [There are now "//trim(asChar(this%iNumTables))//" tables in memory.]")
-!        call echolog("")
-!      endif
-!
-!     deallocate(pQ)
+
      call this%deallocate(pQ)
 
    endif
@@ -552,14 +531,14 @@ function node_double_rotation_fn(pPivot, iDirection)    result(pSave)
 
       case(LEFT)
 
-        pPivot%pLeft &
-          => node_single_rotation_fn(pPivot%pLeft,flip_direction(iDirection))
+        pPivot%pRight &
+          => node_single_rotation_fn(pPivot%pRight,flip_direction(iDirection))
         pSave => node_single_rotation_fn(pPivot, iDirection)
 
       case(RIGHT)
 
-        pPivot%pRight &
-          => node_single_rotation_fn(pPivot%pRight,flip_direction(iDirection))
+        pPivot%pLeft &
+          => node_single_rotation_fn(pPivot%pLeft,flip_direction(iDirection))
         pSave => node_single_rotation_fn(pPivot, iDirection)
 
       case default
@@ -789,17 +768,17 @@ end subroutine traverse_tree_summarize_table_sub
 
 !! This function procedure searches a binary search tree for the given element KEY.  It
 !! returns the location of the element, or a null pointer if the element could not be found.
-function find_node_in_tree_fn (this,sNodeName)   result (pQosition)
+function find_node_in_tree_fn (this,sNodeName)   result (sPosition)
    !! INCOMINQ:   Key    = the given value to be matched with an element of the tree.
    !!       Root  = a pointer to the root of the tree to be searched.
    !! RETURNS: A pointer to the element (if Key is found in the tree), or a null pointer (if not found)
 
    class(TIME_SERIES_COLLECTION) :: this
    character (len=*), intent(in)   :: sNodeName
-   type (T_NODE), pointer          :: pQosition
+   type (T_NODE), pointer          :: sPosition
 
    this%pCurrent => this%pRoot
-   nullify(pQosition)
+   nullify(sPosition)
 
    do
       if (.not. associated(this%pCurrent ) ) then
@@ -807,19 +786,19 @@ function find_node_in_tree_fn (this,sNodeName)   result (pQosition)
       end if
 
       if ( LGT(this%pCurrent%sNodeName, sNodeName) ) then                !! Take the left path.
-      print *, quote(this%pCurrent%sNodeName)//" (tree) > (target) ",quote(sNodeName)
+!      print *, quote(this%pCurrent%sNodeName)//" (tree) > (target) ",quote(sNodeName)
          this%pCurrent => this%pCurrent%pLeft
       else if (LLT(this%pCurrent%sNodeName, sNodeName) ) then           !! Take the right path.
-      print *, quote(this%pCurrent%sNodeName)//" (tree) < (target) ",quote(sNodeName)
+!      print *, quote(this%pCurrent%sNodeName)//" (tree) < (target) ",quote(sNodeName)
          this%pCurrent => this%pCurrent%pRight
       else                                        !! The desired element was found.
-         pQosition => this%pCurrent
-      print *, quote(this%pCurrent%sNodeName)//" (tree) == (target) ",quote(sNodeName)
+         sPosition => this%pCurrent
+!      print *, quote(this%pCurrent%sNodeName)//" (tree) == (target) ",quote(sNodeName)
          return
       end  if
    end  do
 
-   nullify (pQosition)                             !! The element did not exist in the tree.
+   nullify (sPosition)                             !! The element did not exist in the tree.
    call assert(lFALSE,"Failed to find series "//quote(sNodeName)//" in tree structure.", &
      trim(__FILE__), __LINE__)
 
@@ -1561,7 +1540,7 @@ TREE_CLIMBINQ_LOOQ:                 &
     ! must rebalance tree following an addition
 !    call this%rebalanceTree()
 
-    call this%makeDot()
+!    call this%makeDot()
 
   end subroutine add_node_sub
 
@@ -3415,7 +3394,7 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
   type (T_TIME_SERIES), pointer :: pTS
   real (kind=T_SGL), dimension(:), allocatable :: rTempValue
   integer (kind=T_INT) :: iNumSeries
-  character (len=256) :: sQreviousSeriesName
+  character (len=256) :: sPreviousSeriesName
 
   iNumFields = countFields(trim(sFuncTxt),OPERATORS//" ")
 
@@ -3438,10 +3417,10 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
       call TSCOL%insert( pNewSeries=pTS )
       lInclude(i) = lTRUE
       if(iNumSeries>1) then
-        lConsistentTimebase = this%datesEqual(sQreviousSeriesName, sVarTxt(i) )
+        lConsistentTimebase = this%datesEqual(sPreviousSeriesName, sVarTxt(i) )
         if(.not. lConsistentTimebase) exit
       endif
-      sQreviousSeriesName = sVarTxt(i)
+      sPreviousSeriesName = sVarTxt(i)
     endif
   enddo
 
