@@ -34,7 +34,7 @@ module tsp_collections
     type (T_NODE), pointer :: pRight => null()
     type (T_NODE), pointer :: pLeft => null()
     type (T_NODE), pointer :: pParent => null()
-    type (T_NODE), dimension(:), pointer :: pLink
+    type (T_NODE), dimension(:), pointer :: pLink => null()
 
     integer (kind=T_INT) :: iColor = RED
 
@@ -314,11 +314,16 @@ subroutine insert_top_down_sub(this, pNewNode)
    type (T_NODE), pointer        :: pFalseRoot
    type (T_NODE), pointer        :: pG, pT      ! pointers to grandparent and parent
    type (T_NODE), pointer        :: pP, pQ      ! pointers to parent and iterator
+   type (T_NODE), pointer        :: pTemp
    integer (kind=T_INT) :: iDir, iDir2, iLast
 
    ! initialize direction index
    iDir = LEFT
    iLast = LEFT
+
+   nullify(pG, pT, pP, pQ, pFalseRoot)
+
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
    ! if we're given a null pointer as a new node, return without doing anything!
    if(.not. associated(pNewNode) ) return
@@ -327,6 +332,7 @@ subroutine insert_top_down_sub(this, pNewNode)
      ! empty tree case
      this%pRoot => pNewNode
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
    else
 
@@ -336,15 +342,21 @@ subroutine insert_top_down_sub(this, pNewNode)
      pFalseRoot%pRight => this%pRoot
      pT => pFalseRoot
      pQ => this%pRoot
+     iDir = get_direction( LLT(pQ%sNodename, pNewNode%sNodename) )
      nullify(pG)
      nullify(pP)
 
      do
+
+!       print *, "iDir = ",iDir,"   iLast = ",iLast
        if(.not. associated(pQ) ) then
+
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
          ! insert new node at bottom
          pQ => pNewNode
 
-
+         ! if the newly inserted node is NOT null, continue
          if(associated(pQ) )  then
 
            select case (iDir)
@@ -352,8 +364,12 @@ subroutine insert_top_down_sub(this, pNewNode)
              case(LEFT)
                pP%pLeft => pNewNode
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
              case(RIGHT)
                pP%pRight => pNewNode
+
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
            end select
          endif
@@ -364,6 +380,8 @@ subroutine insert_top_down_sub(this, pNewNode)
               .and. get_node_color(pQ%pRight) == RED ) then
          ! color flip
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
          call set_node_color(pQ, RED)
          call set_node_color(pQ%pLeft, BLACK)
          call set_node_color(pQ%pRight, BLACK)
@@ -371,18 +389,32 @@ subroutine insert_top_down_sub(this, pNewNode)
 
        ! Fix red violation: child and parent cannot both be red
        if( get_node_color(pQ) == RED .and. get_node_color(pP) == RED ) then
-         iDir2 = get_direction(associated(get_right_pointer(pT), pG) )
+         pTemp => get_right_pointer(pT)
+         iDir2 = get_direction(associated(pTemp, pG) )
 
          select case(iLast)
            case(LEFT)
 
-             if(associated(pQ, get_left_pointer(pP) ) ) then
+               pTemp => get_left_pointer(pP)
+!               print *, "********   pQ: ",trim(pQ%sNodename)
+               if(associated(pTemp) ) then
+!                 print *, "********   pP%pLeft: ", trim(pTemp%sNodename)
+               else
+!                 print *, "********   pP%pLeft: NULL"
+               endif
+!               print *, "   ASSOCIATED(pQ, pP%pLeft)? ",associated(pQ, pTemp)
+
+             if(associated(pQ, pTemp ) ) then
                select case(iDir2)
                  case(LEFT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
                    pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
+
                  case(RIGHT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
                    pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
                end select
 
@@ -391,9 +423,11 @@ subroutine insert_top_down_sub(this, pNewNode)
                select case(iDir2)
                  case(LEFT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
                    pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
                  case(RIGHT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
                    pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
                end select
 
@@ -401,13 +435,31 @@ subroutine insert_top_down_sub(this, pNewNode)
 
            case(RIGHT)
 
-             if(associated(pQ, get_right_pointer(pP) ) ) then
+               pTemp => get_right_pointer(pP)
+
+!               print *, "********   pQ: ",trim(pQ%sNodename)
+               if(associated(pTemp) ) then
+!                 print *, "********   pP%pRight: ", trim(pTemp%sNodename)
+               else
+!                 print *, "********   pP%pRight: NULL"
+               endif
+!               print *, "   ASSOCIATED(pQ, pP%pRight)? ",associated(pQ, pTemp)
+
+
+             if(associated(pQ, pTemp ) ) then
+
                select case(iDir2)
 
                  case(LEFT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
                    pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
                  case(RIGHT)
+
+   !!! branch taken under gfortran
+
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
                    pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
                end select
@@ -416,8 +468,14 @@ subroutine insert_top_down_sub(this, pNewNode)
                select case(iDir2)
                  case(LEFT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
                    pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
+
                  case(RIGHT)
+
+   !!! branch taken under ifort
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
                    pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
                end select
@@ -442,9 +500,13 @@ subroutine insert_top_down_sub(this, pNewNode)
 
          case(LEFT)
 
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+
            pQ => pQ%pLeft
 
          case(RIGHT)
+
+!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
            pQ => pQ%pRight
 
@@ -465,6 +527,7 @@ subroutine insert_top_down_sub(this, pNewNode)
 
    endif
 
+   if(associated(pFalseRoot) ) call this%deallocate(pFalseRoot)
    ! ensure root node is black
    call set_node_color(this%pRoot, BLACK)
 
@@ -1182,6 +1245,8 @@ TREE_CLIMBINQ_LOOQ:                 &
     type (T_NODE), pointer            :: pNode
     type (T_NODE), pointer            :: pMember
 
+    nullify(pMember)
+
     if(associated(pNode) ) then
 
       pMember => pNode%pRight
@@ -1200,6 +1265,8 @@ TREE_CLIMBINQ_LOOQ:                 &
 
     type (T_NODE), pointer            :: pNode
     type (T_NODE), pointer            :: pMember
+
+    nullify(pMember)
 
     if(associated(pNode) ) then
 
@@ -1260,6 +1327,65 @@ TREE_CLIMBINQ_LOOQ:                 &
 
 
   end function get_direction
+
+!------------------------------------------------------------------------------
+
+  subroutine dump(pQ, pG, pT, pP, pRoot, iLine)
+
+   type (T_NODE), pointer        :: pG, pT         ! pointers to grandparent and parent
+   type (T_NODE), pointer        :: pP, pQ, pRoot  ! pointers to parent and iterator and root
+   integer (kind=T_INT) :: iLine
+
+   ! [ LOCALS ]
+   character(len=24) :: sDateStr, sDateStrQretty
+
+   !!! branch taken under ifort
+   call GetSysTimeDate(sDateStr,sDateStrQretty)
+   print *, trim(sDateStr)//": ", iLine
+
+   if(associated(pRoot) ) then
+     print *, "pRoot => "//quote(pRoot%sNodename)
+     if(associated(pRoot%pLeft) ) print *, "   pRoot%pLeft => "//quote(pRoot%pLeft%sNodename)
+     if(associated(pRoot%pRight) ) print *, "   pRoot%pRight => "//quote(pRoot%pRight%sNodename)
+   else
+     print *, "pRoot => NULL"
+   endif
+
+   if(associated(pG) ) then
+     print *, "pG => "//quote(pG%sNodename)
+     if(associated(pG%pLeft) ) print *, "   pG%pLeft => "//quote(pG%pLeft%sNodename)
+     if(associated(pG%pRight) ) print *, "   pG%pRight => "//quote(pG%pRight%sNodename)
+   else
+     print *, "pG => NULL"
+   endif
+
+   if(associated(pT) ) then
+     print *, "pT => "//quote(pT%sNodename)
+     if(associated(pT%pLeft) ) print *, "   pT%pLeft => "//quote(pT%pLeft%sNodename)
+     if(associated(pT%pRight) ) print *, "   pT%pRight => "//quote(pT%pRight%sNodename)
+   else
+     print *, "pT => NULL"
+   endif
+
+   if(associated(pP) ) then
+     print *, "pP => "//quote(pP%sNodename)
+     if(associated(pP%pLeft) ) print *, "   pP%pLeft => "//quote(pP%pLeft%sNodename)
+     if(associated(pP%pRight) ) print *, "   pP%pRight => "//quote(pP%pRight%sNodename)
+   else
+     print *, "pP => NULL"
+   endif
+
+   if(associated(pQ) ) then
+     print *, "pQ => "//quote(pQ%sNodename)
+     if(associated(pQ%pLeft) ) print *, "   pQ%pLeft => "//quote(pQ%pLeft%sNodename)
+     if(associated(pQ%pRight) ) print *, "   pQ%pRight => "//quote(pQ%pRight%sNodename)
+   else
+     print *, "pQ => NULL"
+   endif
+
+   print *, "****"
+
+  end subroutine dump
 
 !------------------------------------------------------------------------------
 
@@ -1489,6 +1615,8 @@ TREE_CLIMBINQ_LOOQ:                 &
         call echolog("")
       endif
     endif
+
+    pNewNode%iColor = RED
 
     call insert_top_down_sub(this, pNewNode)
 
