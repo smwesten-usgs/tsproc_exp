@@ -2220,18 +2220,10 @@ subroutine finalize()
   call echolog("")
 
   call INFILE%close()
-  call TS%clear()
+!  call TS%clear()
   call closelog()
 
 end subroutine finalize
-
-!------------------------------------------------------------------------------
-
-subroutine clear()
-
-  call TS%clear()
-
-end subroutine clear
 
 !------------------------------------------------------------------------------
 

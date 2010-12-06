@@ -45,6 +45,8 @@ module tsp_data_structures
 
   integer LU_TSPROC_CONTROL,LU_OUT
 
+  integer (kind=T_INT) :: iIMAGE_NUM = 0
+
   ! define constants for use in processing C table entries
   integer (kind=T_INT), parameter :: iNUM_C_TABLE_STATS = 8
   enum, bind(c)

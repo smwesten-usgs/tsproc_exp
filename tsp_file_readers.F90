@@ -669,9 +669,9 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
         endif
       else  ! user has not specified a list of sites; assume that all sites are requested
         lSkipThisSite = lFALSE
-        pTS%sDescription = "Series "//quote(pSITE(j))//" from SSF file " &
-           //quote(pFILE(1))//", site "//trim(pSITE(j))
-        pTS%sSeriesName = pSITE(j)
+        pTS%sDescription = "Series "//quote(sSiteID)//" from SSF file " &
+           //quote(pFILE(1))//", site "//trim(sSiteID)
+        pTS%sSeriesName = sSiteID
       endif
 
     endif
