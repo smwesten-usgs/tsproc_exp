@@ -34,7 +34,6 @@ module tsp_collections
     type (T_NODE), pointer :: pRight => null()
     type (T_NODE), pointer :: pLeft => null()
     type (T_NODE), pointer :: pParent => null()
-
     integer (kind=T_INT) :: iColor = RED
 
     character (len=256) :: sNodeName = ""
@@ -69,8 +68,8 @@ module tsp_collections
     procedure :: calculate => calc_values_from_equation_fn
     procedure :: clear => clear_node_contents_sub
     procedure :: newTimeBase => conform_ts_sub
-    procedure :: removeNode => delete_node_from_tree_sub
-!    procedure :: removeNode => delete_top_down_sub
+!    procedure :: removeNode => delete_node_from_tree_sub
+    procedure :: removeNode => delete_top_down_sub
     procedure :: removeTS => remove_ts_link_sub
     procedure :: removeTable => remove_table_link_sub
     procedure :: insert => add_node_sub
@@ -143,7 +142,7 @@ subroutine delete_top_down_sub(this, sNodename)
      ! us closer to the target
      pQ_Link => follow_link(pQ, iDir)
 
-     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+!     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
 
      ! if child is null, we've reached a leaf; end loop
      if(.not. associated(pQ_Link) ) exit
@@ -168,7 +167,7 @@ subroutine delete_top_down_sub(this, sNodename)
        if( str_compare(pQ%sNodename, sNodename) ) then
 
          pF => pQ
-              call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+!              call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
        endif
      endif
 
@@ -178,30 +177,30 @@ subroutine delete_top_down_sub(this, sNodename)
          select case (iLast)
            case(LEFT)
 
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
              pP => node_single_rotation_fn(pQ, iDir)
 !             pP%pLeft => node_single_rotation_fn(pQ, iDir)
 !             pP%pLeft => node_single_rotation_fn(pQ, iDir)
              pP%pLeft => pP
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
            case(RIGHT)
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
-        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+!        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
              pP => node_single_rotation_fn(pQ, iDir)
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
-        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+!        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 !             pP%pRight => node_single_rotation_fn(pQ, iDir)
 !             pP%pRight => node_single_rotation_fn(pQ, iDir)
              pP%pRight => pP
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
          end select
 
        else if ( get_node_color(pQ_NotLink) == BLACK ) then
 !         pS => follow_link(pQ, iLast)
          ! find the SIBLING to the CURRENT NODE
          pS => follow_link(pP, flip_direction(iLast) )
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
-        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+!        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
          if( associated(pS) ) then
 
            ! find the children of the sibling
@@ -214,7 +213,7 @@ subroutine delete_top_down_sub(this, sNodename)
              call set_node_color(pP, BLACK)
              call set_node_color(pS, RED)
              call set_node_color(pQ, RED)
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
            elseif(associated(pG) ) then
                          call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 !             pTemp => get_right_pointer(pG)
@@ -225,21 +224,21 @@ subroutine delete_top_down_sub(this, sNodename)
                 call set_pointer(pG, pTemp, iDir2)
 
 !               pG_Link => node_double_rotation_fn(pP, iLast)
-               call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
-               call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+          !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+!               call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 
              elseif( get_node_color(pS_NotLink) == RED ) then
-!                pTemp => node_single_rotation_fn(pP, iLast)
-!                call set_pointer(pG, pTemp, iDir2)
-!               pG_Link => node_single_rotation_fn(pP, iLast)
+                pTemp => node_single_rotation_fn(pP, iLast)
+                call set_pointer(pG, pTemp, iDir2)
+               pG_Link => node_single_rotation_fn(pP, iLast)
 
-               call node_single_rotation_sub(pPivot=pP, &
-                                             pAssign=pG, &
-                                             iRotationDir=iLast, &
-                                             iBranchDir=iDir2)
+!               call node_single_rotation_sub(pPivot=pP, &
+!                                             pAssign=pG, &
+!                                             iRotationDir=iLast, &
+!                                             iBranchDir=iDir2)
 
-               call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
-               call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+          !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+!               call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
              endif
 
              ! ensure correct node coloring
@@ -257,7 +256,7 @@ subroutine delete_top_down_sub(this, sNodename)
                endif
              endif
 
-             call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+        !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
 
            endif
          endif
@@ -265,17 +264,17 @@ subroutine delete_top_down_sub(this, sNodename)
      endif
 
      ! update root and make it black
-     this%pRoot => pFalseRoot%pRight
-     call set_node_color(this%pRoot, BLACK)
+!     this%pRoot => pFalseRoot%pRight
+!     call set_node_color(this%pRoot, BLACK)
 
    enddo
 
    ! Replace and remove, if found
    if( associated(pF) ) then
 
-        call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
+   !     call this%makeDot(  pQ, pG, pF, pP, pS, this%pRoot, __LINE__ )
 
-     call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+!     call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 
      ! vacate any existing data series or tables in FOUND node
      call this%clear(pF)
@@ -309,7 +308,7 @@ subroutine delete_top_down_sub(this, sNodename)
 
      end select
 
-     call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+!     call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 
      if(associated(pQ) ) then
        nullify(pQ%pRight)
@@ -323,17 +322,17 @@ subroutine delete_top_down_sub(this, sNodename)
    endif
 
    ! update root and make it black
-!   this%pRoot => pFalseRoot%pRight
-!   call set_node_color(this%pRoot, BLACK)
+   this%pRoot => pFalseRoot%pRight
+   call set_node_color(this%pRoot, BLACK)
 
    call warn( lFound, "Failed to find entity "//quote(sNodename)//". Nothing deleted." )
 
-   if(associated(pFalseRoot) )  call this%clear(pFalseRoot)
+!   if(associated(pFalseRoot) )  call this%clear(pFalseRoot)
    deallocate(pFalseRoot)
 
-        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+!        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 
-   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
+!   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
 
 end subroutine delete_top_down_sub
 
@@ -409,70 +408,60 @@ subroutine insert_top_down_sub(this, pNewNode)
    iDir = LEFT
    iLast = LEFT
 
-   nullify(pG, pT, pP, pQ, pFalseRoot)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+   nullify(pG, pT, pP, pQ, pFalseRoot, pTemp)
 
    ! if we're given a null pointer as a new node, return without doing anything!
-   if(.not. associated(pNewNode) ) return
+   if(.not. associated(pNewNode) ) then
+!     call dump(pQ, pG, pT, pP, pTemp, this%pRoot, iDir, iLast, __LINE__)
+     return
+   endif
 
    if( .not. associated(this%pRoot ) ) then
      ! empty tree case
      this%pRoot => pNewNode
+     if(.not. associated(pFalseRoot) ) allocate(pFalseRoot)
+     pFalseRoot%pRight => this%pRoot
 
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+!     call dump(pQ, pG, pT, pP, pTemp, this%pRoot, iDir, iLast, __LINE__)
 
    else
 
-     if(.not. associated(pFalseRoot) ) allocate(pFalseRoot)
-
      ! set up helper pointers
+     if(.not. associated(pFalseRoot) ) allocate(pFalseRoot)
      pFalseRoot%pRight => this%pRoot
      pT => pFalseRoot
+     pT%pRight => this%pRoot
      pQ => this%pRoot
-     iDir = get_direction( LLT(pQ%sNodename, pNewNode%sNodename) )
      nullify(pG)
      nullify(pP)
 
+!     call dump(pQ, pG, pT, pP, pTemp, this%pRoot, iDir, iLast, __LINE__)
+
      do
 
-!       print *, "iDir = ",iDir,"   iLast = ",iLast
        if(.not. associated(pQ) ) then
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
 
          ! insert new node at bottom
          pQ => pNewNode
 
-         ! if the newly inserted node is NOT null, continue
-         if(associated(pQ) )  then
+         ! if the newly inserted node is null, get out!
+         if(.not. associated(pQ) ) exit
 
-           select case (iDir)
-
-             case(LEFT)
-               pP%pLeft => pNewNode
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-             case(RIGHT)
-               pP%pRight => pNewNode
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-           end select
-         endif
-
-         exit
+         call set_child(pP, iDir, pNewNode)
+!         call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
 
        elseif(get_node_color(pQ%pLeft) == RED &
               .and. get_node_color(pQ%pRight) == RED ) then
+
+!         call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
+
          ! color flip
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
          call set_node_color(pQ, RED)
          call set_node_color(pQ%pLeft, BLACK)
          call set_node_color(pQ%pRight, BLACK)
+
+!         call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
+
        endif
 
        ! Fix red violation: child and parent cannot both be red
@@ -480,185 +469,86 @@ subroutine insert_top_down_sub(this, pNewNode)
          pTemp => get_right_pointer(pT)
          iDir2 = get_direction(associated(pTemp, pG) )
 
-         select case(iLast)
-           case(LEFT)
+         pTemp => get_child(pP, iLast)
+         if(associated(pQ, pTemp ) ) then
 
-               pTemp => get_left_pointer(pP)
-!               print *, "********   pQ: ",trim(pQ%sNodename)
-               if(associated(pTemp) ) then
-!                 print *, "********   pP%pLeft: ", trim(pTemp%sNodename)
-               else
-!                 print *, "********   pP%pLeft: NULL"
-               endif
-!               print *, "   ASSOCIATED(pQ, pP%pLeft)? ",associated(pQ, pTemp)
+           ! set great-grandparent child to grandparent node after rotation
+           call set_child(pT, iDir2, node_single_rotation_fn( pG, flip_direction(iLast) ) )
+!           call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
 
-             if(associated(pQ, pTemp ) ) then
-               select case(iDir2)
-                 case(LEFT)
+         else
 
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
+             call set_child(pT, iDir2, node_double_rotation_fn( pG, flip_direction(iLast) ) )
+!             call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
 
-                   pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
-
-                 case(RIGHT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-                   pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
-               end select
-
-             else
-
-               select case(iDir2)
-                 case(LEFT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-                   pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
-                 case(RIGHT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-                   pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
-               end select
-
-             endif
-
-           case(RIGHT)
-
-               pTemp => get_right_pointer(pP)
-
-!               print *, "********   pQ: ",trim(pQ%sNodename)
-               if(associated(pTemp) ) then
-!                 print *, "********   pP%pRight: ", trim(pTemp%sNodename)
-               else
-!                 print *, "********   pP%pRight: NULL"
-               endif
-!               print *, "   ASSOCIATED(pQ, pP%pRight)? ",associated(pQ, pTemp)
-
-
-             if(associated(pQ, pTemp ) ) then
-
-               select case(iDir2)
-
-                 case(LEFT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-                   pT%pLeft => node_single_rotation_fn( pG, flip_direction(iLast) )
-                 case(RIGHT)
-
-   !!! branch taken under gfortran
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-                   pT%pRight => node_single_rotation_fn( pG, flip_direction(iLast) )
-               end select
-
-             else
-               select case(iDir2)
-                 case(LEFT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-                   pT%pLeft => node_double_rotation_fn( pG, flip_direction(iLast) )
-
-                 case(RIGHT)
-
-   !!! branch taken under ifort
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-                   pT%pRight => node_double_rotation_fn( pG, flip_direction(iLast) )
-               end select
-             endif
-
-         end select
+         endif
 
        endif
 
-       ! if after the rotations we have a null pointer at the current node, cycle and
+!       ! if after the rotations we have a null pointer at the current node, cycle and
        ! allow pNewNode to be placed appropriately
-       if (.not. associated(pQ) ) cycle
+!       if (.not. associated(pQ) ) cycle
+
+       if(associated(pQ)) then
+         if(str_compare(pQ%sNodename, pNewNode%sNodename) ) then
+!           call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
+           exit
+         endif
+       endif
 
        iLast = iDir
-       iDir = get_direction( LLT(pQ%sNodename, pNewNode%sNodename) )
+       if(associated(pQ)) iDir = get_direction( LLT(pQ%sNodename, pNewNode%sNodename) )
 
        if (associated(pG) )  pT => pG
        pG => pP
        pP => pQ
 
-       select case(iDir)
-
-         case(LEFT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-           pQ => pQ%pLeft
-
-         case(RIGHT)
-
-!  call dump(pQ, pG, pT, pP, this%pRoot, __LINE__)
-
-           pQ => pQ%pRight
-
-       end select
-
-       if(associated(pQ)) then
-         if(str_compare(pQ%sNodename, pNewNode%sNodename) ) then
-           call assert(lFALSE, "Duplicate series names are not allowed! Found more than " &
-             //"one instance of series "//quote(pNewNode%sNodename), &
-             trim(__FILE__), __LINE__)
-         endif
-       endif
+       pQ => get_child(pQ, iDir)
+!       call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
 
      enddo
 
-     ! update root
-     this%pRoot => pFalseRoot%pRight
-
    endif
 
-   if(associated(pFalseRoot) ) then
-     call this%clear(pFalseRoot)
-     deallocate(pFalseRoot)
-   endif
+   ! update root
+   this%pRoot => pFalseRoot%pRight
 
    ! ensure root node is black
    call set_node_color(this%pRoot, BLACK)
+!   call make_dot(this, pQ=pQ, pG=pG, pF=pT, pP=pP, pRoot=this%pRoot, iLine_=__LINE__)
+
+   deallocate(pFalseRoot)
 
 end subroutine insert_top_down_sub
 
 !------------------------------------------------------------------------------
 
-function node_single_rotation_fn(pPivot, iDirection)    result(pSave)
+function node_single_rotation_fn(pRoot, iDirection)    result(pSave)
 
-  type (T_NODE), pointer :: pPivot
+  type (T_NODE), pointer :: pRoot
   integer (kind=T_INT) :: iDirection
   type (T_NODE), pointer :: pSave
 
   pSave => null()
 
-  if(associated(pPivot) ) then
+  if(associated(pRoot) ) then
 
     select case(iDirection)
 
       case(LEFT)
 
-        pSave => pPivot%pRight
+        pSave => pRoot%pRight
         if(associated(pSave) ) then
-          pPivot%pRight => pSave%pLeft
-          pSave%pLeft => pPivot
-          call set_node_color(pPivot, RED)
-          call set_node_color(pSave, BLACK)
+          pRoot%pRight => pSave%pLeft
+          pSave%pLeft => pRoot
         endif
-
-
 
       case(RIGHT)
 
-        pSave => pPivot%pLeft
+        pSave => pRoot%pLeft
         if(associated(pSave) ) then
-          pPivot%pLeft => pSave%pRight
-          pSave%pRight => pPivot
-          call set_node_color(pPivot, RED)
-          call set_node_color(pSave, BLACK)
+          pRoot%pLeft => pSave%pRight
+          pSave%pRight => pRoot
         endif
 
       case default
@@ -668,77 +558,13 @@ function node_single_rotation_fn(pPivot, iDirection)    result(pSave)
 
     end select
 
+    call set_node_color(pRoot, RED)
+    call set_node_color(pSave, BLACK)
+
+
   endif
 
 end function node_single_rotation_fn
-
-
-subroutine node_single_rotation_sub(pPivot, pAssign, iRotationDir, iBranchDir)
-
-  type (T_NODE), pointer :: pPivot
-  type (T_NODE), pointer :: pAssign
-  integer (kind=T_INT) :: iRotationDir
-  integer (kind=T_INT) :: iBranchDir
-
-  type (T_NODE), pointer :: pSave
-
-  pSave => null()
-
-  if(associated(pPivot) ) then
-
-    select case(iRotationDir)
-
-      case(LEFT)
-
-        pSave => pPivot%pRight
-        if(associated(pSave) ) then
-          pPivot%pRight => get_left_pointer(pSave)
-          pSave%pLeft => pPivot
-          call set_node_color(pPivot, RED)
-          call set_node_color(pSave, BLACK)
-        endif
-
-
-
-      case(RIGHT)
-
-        pSave => pPivot%pLeft
-        if(associated(pSave) ) then
-          pPivot%pLeft => get_right_pointer(pSave)
-          pSave%pRight => pPivot
-          call set_node_color(pPivot, RED)
-          call set_node_color(pSave, BLACK)
-        endif
-
-      case default
-
-        call assert(lFALSE,"Unhandled select case item: iRotationDir = "//trim(asChar(iRotationDir)), &
-          trim(__FILE__), __LINE__)
-
-    end select
-
-  endif
-
-  select case(iBranchDir)
-
-    case(LEFT)
-
-      if(associated(pAssign) ) pAssign%pLeft => pSave
-
-    case(RIGHT)
-
-      if(associated(pAssign) ) pAssign%pRight => pSave
-
-    case default
-
-        call assert(lFALSE,"Unhandled select case item: iBranchDir = "//trim(asChar(iBranchDir)), &
-          trim(__FILE__), __LINE__)
-
-  end select
-
-  nullify(pSave)
-
-end subroutine node_single_rotation_sub
 
 !------------------------------------------------------------------------------
 
@@ -916,7 +742,7 @@ contains
   end subroutine set_pointer_target
 
 
-  subroutine set_node_color(pNode)
+  subroutine set_node_color_priv(pNode)
 
     type (T_NODE), pointer        :: pNode
 
@@ -932,7 +758,7 @@ contains
         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=cyan, fontcolor=white ];'
     endif
 
-  end subroutine set_node_color
+  end subroutine set_node_color_priv
 
   subroutine set_pointer_color(sLabel, sColor, sTextColor_)
 
@@ -991,8 +817,8 @@ subroutine add_pointers(sNodename)
   if(present(pF) ) then
     if(associated(pF) ) then
       if(str_compare(sNodename,pF%sNodename) ) then
-        call set_pointer_color("pF", "forestgreen", "yellow")
-        call set_pointer_target(pF,"pF")
+        call set_pointer_color("pF_pT", "forestgreen", "yellow")
+        call set_pointer_target(pF,"pF_pT")
       endif
     endif
   endif
@@ -1027,7 +853,7 @@ end subroutine add_pointers
      end  if
 
      ! define the node shape and color
-     call set_node_color(pCurrent)
+     call set_node_color_priv(pCurrent)
 
 
      if(associated(pCurrent%pLeft) ) then
@@ -1157,6 +983,7 @@ function find_node_in_tree_fn (this,sNodeName)   result (sPosition)
    end  do
 
    nullify (sPosition)                             !! The element did not exist in the tree.
+   call this%makeDot()
    call assert(lFALSE,"Failed to find series "//quote(sNodeName)//" in tree structure.", &
      trim(__FILE__), __LINE__)
 
@@ -1212,7 +1039,7 @@ end function find_node_in_tree_fn
          !! If true, the parent is a left node of pX's grandparent.
          if (associated (pX%pParent, pX%pParent%pParent%pLeft) ) then
 
-            !! Qet the address of the uncle.
+            !! Get the address of the uncle.
             pY => pX%pParent%pParent%pRight
             ! test to make sure uncle isn't a null pointer, and that uncle is RED
             lRedUncle = associated(pY)
@@ -1591,6 +1418,59 @@ TREE_CLIMBINQ_LOOQ:                 &
 
   end function get_left_pointer
 
+
+  subroutine set_child(pNode, iDirection, pTarget)
+
+    type (T_NODE), pointer  :: pNode
+    integer (kind=T_INT)    :: iDirection
+    type (T_NODE), pointer  :: pTarget
+
+
+    if(associated(pNode) ) then
+
+      if(iDirection == RIGHT) then
+
+        pNode%pRight => pTarget
+
+      else  ! direction is LEFT
+
+        pNode%pLeft => pTarget
+
+      endif
+
+    else
+
+      call warn(lFALSE, "Attempt to assign target to a null pointer!", &
+          trim(__FILE__), __LINE__)
+
+    endif
+
+  end subroutine set_child
+
+  function get_child(pNode, iDirection)   result(pChild)
+
+    type (T_NODE), pointer  :: pNode
+    integer (kind=T_INT)    :: iDirection
+    type (T_NODE), pointer  :: pChild
+
+    pChild => null()
+
+    if(associated(pNode) ) then
+
+      if(iDirection == RIGHT) then
+
+        pChild => pNode%pRight
+
+      else  ! direction is LEFT
+
+        pChild => pNode%pLeft
+
+      endif
+
+    endif
+
+  end function get_child
+
 !------------------------------------------------------------------------------
 
   !! This function returns the color of the specified node, or black if the node does not exist.
@@ -1952,119 +1832,63 @@ TREE_CLIMBINQ_LOOQ:                 &
 
     pNewNode%iColor = RED
 
-!    call insert_top_down_sub(this, pNewNode)
+    call insert_top_down_sub(this, pNewNode)
 
       ! find a place in the tree to graft the new node to;
       ! travel from root to a node containing a null pointer
 
-      do
-
-        if(.not. associated(this%pCurrent) ) exit
-
-        pParentOfCurrent => this%pCurrent
-
-        ! if current node name > NEW node name, take LEFT path
-        if( LGT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
-          this%pCurrent => this%pCurrent%pLeft
-
-        ! if current node name < NEW node name, take RIGHT path
-        elseif( LLT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
-          this%pCurrent => this%pCurrent%pRight
-
-        else
-          call assert(lFALSE,"Series name "//quote(pNewNode%sNodeName) &
-            //" has already been used. ", &
-            trim(__FILE__),__LINE__)
-          exit
-        endif
-
-      enddo
-      ! upon exit, we have found a node whose left or right pointer field is null
-      ! pCurrent is NULL at this point as well
-
-      pNewNode%pParent => pParentOfCurrent
-      pNewNode%iColor = RED
-
-      if(.not. associated(pParentOfCurrent) ) then  ! we're at the root; color it BLACK
-
-        pNewNode%iColor = BLACK
-
-        this%pRoot => pNewNode
-      elseif( LLT(pNewNode%sNodeName,pParentOfCurrent%sNodeName) ) then
-        pParentOfCurrent%pLeft => pNewNode
-      else
-        pParentOfCurrent%pRight => pNewNode
-      endif
-
-      ! update global pointer to new node
-      this%pCurrent => pNewNode
-      nullify(pNewNode)
-
-!     call this%makeDot()
-
-
-    ! must rebalance tree following an addition
-     call this%rebalanceTree()
-
+!        do
+!
+!          if(.not. associated(this%pCurrent) ) exit
+!
+!          pParentOfCurrent => this%pCurrent
+!
+!          ! if current node name > NEW node name, take LEFT path
+!          if( LGT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
+!            this%pCurrent => this%pCurrent%pLeft
+!
+!          ! if current node name < NEW node name, take RIGHT path
+!          elseif( LLT(this%pCurrent%sNodeName, pNewNode%sNodeName) ) then
+!            this%pCurrent => this%pCurrent%pRight
+!
+!          else
+!            call assert(lFALSE,"Series name "//quote(pNewNode%sNodeName) &
+!              //" has already been used. ", &
+!              trim(__FILE__),__LINE__)
+!            exit
+!          endif
+!
+!        enddo
+!        ! upon exit, we have found a node whose left or right pointer field is null
+!        ! pCurrent is NULL at this point as well
+!
+!        pNewNode%pParent => pParentOfCurrent
+!        pNewNode%iColor = RED
+!
+!        if(.not. associated(pParentOfCurrent) ) then  ! we're at the root; color it BLACK
+!
+!          pNewNode%iColor = BLACK
+!
+!          this%pRoot => pNewNode
+!        elseif( LLT(pNewNode%sNodeName,pParentOfCurrent%sNodeName) ) then
+!          pParentOfCurrent%pLeft => pNewNode
+!        else
+!          pParentOfCurrent%pRight => pNewNode
+!        endif
+!
+!        ! update global pointer to new node
+!        this%pCurrent => pNewNode
+!        nullify(pNewNode)
+!
+! !     call this%makeDot()
+!
+!
+!      ! must rebalance tree following an addition
+!       call this%rebalanceTree()
+!
 !     call this%makeDot()
 
   end subroutine add_node_sub
-
-!------------------------------------------------------------------------------
-  subroutine rebalance_tree_after_insert_v2_sub(this)
-
-    class(TIME_SERIES_COLLECTION) :: this
-
-    ! [ LOCALS ]
-    type(T_NODE), pointer :: pX => null()
-    type(T_NODE), pointer :: pY => null()
-
-    pX => this%pCurrent
-
-      do while (associated(pX%pParent) .and. associated(pX%pParent%pParent) )
-       if(pX%pParent%iColor == BLACK) exit
-       ! need to guard against perfoming ops on null pointers
-!       if(.not. associated(pX%pParent%pParent)) exit
-       if (associated(pX%pParent%pParent%pLeft, pX%pParent)) then
-          pY => pX%pParent%pParent%pRight   ! uncle
-          ! if parent and uncle are both red, current node cannot also be red
-          if (pY%iColor == RED) then
-             pX % pParent %iColor = BLACK
-             pY % iColor = BLACK
-             pX % pParent % pParent % iColor = RED
-             pX => pX % pParent % pParent   ! move up to grandparent
-          else
-             if (associated(pX, pX % pParent % pRight)) then
-                pX => pX % pParent
-                call this%rotateLeft(pX)
-             end if
-             pX % pParent % iColor = BLACK
-             pX % pParent % pParent % iColor = RED
-             call this%rotateRight(pX % pParent % pParent)
-          end if
-       elseif (associated(pX%pParent%pParent%pRight, pX%pParent)) then
-          ! must be Right grandchild to get here
-          pY => pX % pParent % pParent % pLeft    ! aunt
-          if (pY % iColor == RED) then
-             pX % pParent % iColor = BLACK
-             pY % iColor = BLACK
-             pX % pParent % pParent % iColor = RED
-             pX => pX % pParent % pParent
-          else
-             if (associated(pX, pX % pParent % pLeft)) then
-                pX => pX % pParent
-                call this%rotateRight(pX)
-             end if
-             pX % pParent % iColor = BLACK
-             pX % pParent % pParent % iColor = RED
-             call this%rotateLeft(pX % pParent % pParent)
-          end if
-       end if
-    end do
-
-    this % pRoot % iColor = BLACK
-
-  end subroutine rebalance_tree_after_insert_v2_sub
 
 !------------------------------------------------------------------------------
 

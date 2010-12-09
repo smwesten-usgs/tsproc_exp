@@ -294,11 +294,10 @@ contains
     integer (kind=T_INT) :: i, j
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: iCount
+    character (len=MAXNAMELENGTH) :: sSeriesName
+    type (T_TIME_SERIES), pointer :: pTemp
     character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME, &
        pNEW_I_TABLE_NAME
-
-    real (kind=T_SGL), dimension(:), allocatable :: rTempValue
-    type (T_DATETIME), dimension(:), allocatable :: tTempDateTime
 
     type (T_STATS_COLLECTION), pointer :: pStats
     type(T_HI), dimension(:), pointer :: MA
@@ -315,14 +314,14 @@ contains
       endif
 
       ! restrict data to specified date range, if desired
-      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      iCount =  pTS%includeByDate(this%tStartDate, this%tEndDate)
       call Assert(iCount > 0, "Problem calculating I_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
       ! allocate memory for temporary data array
-      allocate(rTempValue(iCount))
-      allocate(tTempDateTime(iCount))
-      rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
-      tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
+!      allocate(rTempValue(iCount))
+!      allocate(tTempDateTime(iCount))
+!      rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
+!      tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
 
       ! determine what the new I Table name should be....
       pNEW_I_TABLE_NAME => pBlock%getString("NEW_I_TABLE_NAME")
@@ -339,16 +338,28 @@ contains
 
       this%sSeriesName = trim(pTS%sSeriesName)//"_HI" ! default value if none provided
 
-      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      iCount =  pTS%includeByDate(this%tStartDate, this%tEndDate)
       call Assert(iCount > 0, "Problem calculating I_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
 
       ! allocate memory for temporary data array
-      allocate(rTempValue(iCount))
-      allocate(tTempDateTime(iCount))
-      rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
-      tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
+!      allocate(rTempValue(iCount))
+!      allocate(tTempDateTime(iCount))
+!      rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
+!      tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
 
+
+    endif
+
+    this%sDescription = "Streamflow statistics calculated from series"//quote(pTS%sSeriesName)
+
+    if(this%tStartDate > pTS%tStartDate .or. this%tEndDate < pTS%tEndDate ) then
+
+      pStats => pTS%statsCreateObject( sSeriesName )
+
+    else
+
+      pStats => pTS%statsCreateObject( sSeriesName )
 
     endif
 
@@ -356,8 +367,10 @@ contains
     ! calculated statistics on the time series by month, by year, by year and month
     ! and for the overall time series. Once this call is made, we simply have to
     ! pull out the statistics of interest.
-    pStats => create_stats_object(rTempValue, tTempDateTime%iMonth, &
-                   tTempDateTime%iYear, tTempDateTime%iJulianDay, this%sSeriesName)
+
+!    pStats => create_stats_object(pack(pTS%tData%rValue, pTS%tData%lSelect), &
+!       pack(pTS%tData%tDT%iMonthrValue, pTS%tData%lSelect)tTempDateTime%iMonth, &
+!                   tTempDateTime%iYear, tTempDateTime%iJulianDay, this%sSeriesName)
 
     ! get a pointer to the MA block of streamflow statistics
     MA => compute_hyd_indices_MA(pStats)
@@ -432,6 +445,8 @@ contains
     real (kind=T_SGL), dimension(:), allocatable :: rFLOW, rDELAY
     real (kind=T_SGL), dimension(7), parameter :: DEFAULT_QUANTILES = &
                                          [0.1, 0.2, 0.3, 0.5, 0.75, 0.95, 0.99]
+    real (kind=T_SGL), dimension(7) :: rTempFlowQuantiles
+
 
     lOVER = lTRUE
 
@@ -446,7 +461,7 @@ contains
       endif
 
       ! restrict data to specified date range, if desired
-      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      iCount =  pTS%includeByDate(this%tStartDate, this%tEndDate)
       call Assert(iCount > 0, "Problem calculating E_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
       ! allocate memory for temporary data array
@@ -469,8 +484,12 @@ contains
         allocate(rFLOW( size(pFLOW)) )
         rFLOW = pFLOW
       else
+        ! the following nonsense is needed because gfortran 4.6.0 20101204
+        ! segfaults whith the original formulation...
         allocate(rFLOW(size(DEFAULT_QUANTILES)) )
-        rFLOW = quantiles(DEFAULT_QUANTILES, rTempValue)
+!        rFLOW = quantiles(DEFAULT_QUANTILES, rTempValue)
+        rTempFlowQuantiles = quantiles(DEFAULT_QUANTILES, rTempValue)
+        rFLOW = rTempFlowQuantiles
       endif
 
       ! get DELAY values; if no DELAY values given, use default values
@@ -495,7 +514,7 @@ contains
 
       this%sSeriesName = trim(pTS%sSeriesName)//"_EX" ! default value if none provided
 
-      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      iCount =  pTS%includeByDate(this%tStartDate, this%tEndDate)
       call Assert(iCount > 0, "Problem calculating E_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
 
@@ -505,8 +524,12 @@ contains
       rTempValue = pack(pTS%tData%rValue, pTS%tData%lSelect)
       tTempDateTime = pack(pTS%tData%tDT, pTS%tData%lSelect)
 
+      ! the following nonsense is needed because gfortran 4.6.0 20101204
+      ! segfaults whith the original formulation...
       allocate(rFLOW(size(DEFAULT_QUANTILES)) )
-      rFLOW = quantiles(DEFAULT_QUANTILES, rTempValue)
+!      rFLOW = quantiles(DEFAULT_QUANTILES, rTempValue)
+      rTempFlowQuantiles = quantiles(DEFAULT_QUANTILES, rTempValue)
+      rFLOW = rTempFlowQuantiles
 
       allocate(rDELAY(size(rFLOW)) )
       rDELAY = 0.0
@@ -714,7 +737,7 @@ contains
       endif
 
       ! select only the data within the given date range
-      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      iCount =  pTS%includeByDate(this%tStartDate, this%tEndDate)
       call Assert(iCount > 0, "Problem calculating S_TABLE: no time series data within " &
         //"specified date range for block starting at line " &
         //trim(asChar(pBlock%iStartingLineNumber)), trim(__FILE__), __LINE__)
@@ -812,7 +835,7 @@ contains
       this%tStartDate = pTS%tStartDate
       this%tEndDate = pTS%tEndDate
 
-      iCount =  pTS%selectByDate(this%tStartDate, this%tEndDate)
+      iCount =  pTS%includeByDate(this%tStartDate, this%tEndDate)
       call Assert(iCount > 0, "Problem calculating S_TABLE: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
 

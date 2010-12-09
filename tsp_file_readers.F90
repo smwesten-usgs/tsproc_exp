@@ -785,7 +785,6 @@ subroutine get_mul_series_statvar(pBlock, TS)
   call Assert( iStat == 0, "Problem reading the number of variables contained in " &
     //"statvar file "//quote(pFILE(1) ), trim(__FILE__), __LINE__)
 
-
   allocate(sPRMSVariable(iNumVariables), stat=iStat)
   call Assert(iStat ==0, "Problem allocating memory to store PRMS variable names", &
     trim(__FILE__),__LINE__)
@@ -879,13 +878,13 @@ subroutine get_mul_series_statvar(pBlock, TS)
 
   iLineNum = 0
   do
-    read(unit=LU_DATA, fmt="(a)",iostat=iStat) sBuf
+    read(unit=LU_DATA, fmt="(a4096)",iostat=iStat) sBuf
     read(unit=sBuf, fmt=*,iostat=iStat2) iRecNum, iYear, iMonth, iDay, &
          iHour, iMinute, iSecond, (rStatvarValues(j), j=1,iNumVariables)
 
     if(iStat /= 0) exit
     if(iStat2 /= 0) call Assert(lFALSE, &
-      "Problem reading MM/DD/YYYY HH:MM:SS from SSF file; line = "//quote(sBuf) )
+      "Problem reading MM/DD/YYYY HH:MM:SS from statvar file; line = "//quote(sBuf) )
 
     call tCurrDate%calcJulianDay(iMonth, iDay, iYear, iHour, iMinute, iSecond)
 

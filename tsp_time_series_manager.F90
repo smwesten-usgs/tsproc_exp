@@ -7,17 +7,18 @@ module tsp_time_series_manager
   use tsp_control_file_ops
   implicit none
 
-  integer (kind=T_INT), parameter :: iDAILY_DATA = 0
-  integer (kind=T_INT), parameter :: iSUMMARY_BY_MONTH = 1
-  integer (kind=T_INT), parameter :: iMONTHLY_DATA = 2
-  integer (kind=T_INT), parameter :: iANNUAL_DATA = 3
+  integer (kind=T_INT), parameter, public :: iDAILY_DATA = 0
+  integer (kind=T_INT), parameter, public :: iSUMMARY_BY_MONTH = 1
+  integer (kind=T_INT), parameter, public :: iMONTHLY_DATA = 2
+  integer (kind=T_INT), parameter, public :: iANNUAL_DATA = 3
 
-  type :: T_TIME_SERIES_DATA
+  type, public :: T_TIME_SERIES_DATA
     integer (kind=T_INT) :: iWaterYear     = 0
     type (T_DATETIME) :: tDT
     real (kind=T_SGL)    :: rValue         = -HUGE(rZERO)
     character (len=10)   :: sDataFlag      = ""
-    logical (kind=T_LOGICAL) :: lSelect = lFALSE
+    logical (kind=T_LOGICAL) :: lSelect = lTRUE   ! use this flag to select subset of active range
+    logical (kind=T_LOGICAL) :: lInclude = lTRUE  ! use this flag to preselect by date range
 
   contains
 !    procedure :: calcWaterYear => calc_water_year_sub
@@ -25,7 +26,7 @@ module tsp_time_series_manager
 
   end type T_TIME_SERIES_DATA
 
-  type :: T_TIME_SERIES
+  type, public :: T_TIME_SERIES
     type (T_TIME_SERIES), pointer :: pNext => null()
     type (T_TIME_SERIES), pointer :: pPrevious => null()
     character (len=MAXNAMELENGTH) :: sSiteName = ""
@@ -43,10 +44,20 @@ module tsp_time_series_manager
 
   contains
 
-    procedure :: selectByDate => select_by_date_fn
+    procedure :: includeByDate => include_by_date_fn
     procedure :: selectByValue => select_by_value_fn
+    procedure :: selectByMonth => select_by_month_fn
+    procedure :: selectByMonthAndYear => select_by_month_and_year_fn
+    procedure :: selectByYear => select_by_year_fn
+    procedure :: selectByWaterYear => select_by_water_year_fn
 
-    procedure :: reset => select_reset_sub
+    procedure :: statsCreateObject => ts_create_stats_object_fn
+    procedure :: statsByMonth => ts_calc_stats_by_month_fn
+    procedure :: statsByYear => ts_calc_stats_by_year_fn
+    procedure :: statsByMonthAndYear => ts_calc_stats_by_month_and_year_fn
+
+    procedure :: reset => select_none_sub
+    procedure :: selectAll => select_all_sub
     procedure :: list => list_output_sub
     procedure :: writeInstructions => list_output_instructions_sub
     procedure :: calcPeriodStatistics => calculate_period_statistics_fn
@@ -114,6 +125,7 @@ contains
 
     ! [ LOCALS ]
     type(T_TIME_SERIES_DATA), dimension(:), allocatable :: tTempData
+    real (kind=T_SGL), parameter :: rIncreaseByFactor = 2.0
     integer (kind=T_INT) :: iStat
 
     if(this%iCurrentRecord + 1 > size(this%tData) ) then  ! need to increase array size
@@ -122,7 +134,7 @@ contains
         trim(__FILE__),__LINE__)
       tTempData = this%tData
       deallocate(this%tData)
-      allocate(this%tData(int(this%iCurrentRecord * 1.3333)), stat=iStat)
+      allocate(this%tData(int(this%iCurrentRecord * rIncreaseByFactor)), stat=iStat)
       call assert(iStat==0,"Memory allocation error", &
         trim(__FILE__),__LINE__)
       this%tData(1:this%iCurrentRecord) = tTempData(1:this%iCurrentRecord)
@@ -395,7 +407,7 @@ contains
 
    rVolume = rD_ZERO
 
-   iCount = this%selectByDate(tGE_DT, tLE_DT)
+   iCount = this%includeByDate(tGE_DT, tLE_DT)
 
    call Assert(iCount > 2, "Not enough data to perform integration ("// &
      trim(this%sSeriesname)//", start:end = " &
@@ -554,28 +566,36 @@ contains
 
 !------------------------------------------------------------------------------
 
-  subroutine select_reset_sub(this)
+  subroutine select_none_sub(this)
 
     class(T_TIME_SERIES) :: this
 
     this%tData%lSelect = lFALSE
 
-  end subroutine select_reset_sub
+  end subroutine select_none_sub
 
 !------------------------------------------------------------------------------
 
-  function select_by_date_fn(this, GE, LE, keep)  result(iCount)
+  subroutine select_all_sub(this)
+
+    class(T_TIME_SERIES) :: this
+
+    this%tData%lSelect = lTRUE
+
+  end subroutine select_all_sub
+
+!------------------------------------------------------------------------------
+
+  function include_by_date_fn(this, GE, LE)  result(iCount)
 
     class(T_TIME_SERIES) :: this
     type (T_DATETIME), intent(in), optional :: GE
     type (T_DATETIME),intent(in),optional   :: LE
-    logical (kind=T_LOGICAL), intent(in), optional :: keep
     integer (kind=T_INT) :: iCount
 
     ! [ LOCALS ]
     type (T_DATETIME) :: tGE_DT
     type (T_DATETIME) :: tLE_DT
-    logical (kind=T_LOGICAL) :: lKeep
     integer (kind=T_INT) :: i
 
     ! if no arguments supplied, all time series elements will be selected
@@ -591,69 +611,217 @@ contains
       tLE_DT = this%tEndDate
     endif
 
+    do i=1,size(this%tData)
+      if(this%tData(i)%tDT >= tGE_DT .and. this%tData(i)%tDT <= tLE_DT) then
+        this%tData(i)%lInclude = lTRUE
+      else
+        this%tData(i)%lInclude = lFALSE
+      endif
+    enddo
+
+    iCount = count(this%tData%lInclude)
+
+  end function include_by_date_fn
+
+!------------------------------------------------------------------------------
+
+  function select_by_month_fn(this, iMonth, lKeep_)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    integer (kind=T_INT), intent(in) :: iMonth
+    logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+
     ! if this is TRUE, the select does not alter the status for points
     ! outside the current selection range (i.e. if lKeep is false, ALL
     ! points in the series are scanned and assigned TRUE/FALSE status.
-    if(present(keep)) then
-      lKeep = keep
+    if(present(lKeep_)) then
+      lKeep = lKeep_
     else
       lKeep = lFALSE
     endif
 
     if(lKeep) then
 
-      do i=1,size(this%tData)
-        if(this%tData(i)%tDT >= tGE_DT &
-            .and. this%tData(i)%tDT <= tLE_DT) then
-          this%tData(i)%lSelect = lTRUE
-        endif
-      enddo
+      where (this%tData%tDT%iMonth == iMonth .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      endwhere
 
     else
 
-      do i=1,size(this%tData)
-        if(this%tData(i)%tDT >= tGE_DT &
-              .and. this%tData(i)%tDT <= tLE_DT) then
-          this%tData(i)%lSelect = lTRUE
-        else
-          this%tData(i)%lSelect = lFALSE
-        endif
-      enddo
+      where (this%tData%tDT%iMonth == iMonth .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      elsewhere
+        this%tData%lSelect = lFALSE
+      endwhere
 
     endif
 
     iCount = count(this%tData%lSelect)
 
-  end function select_by_date_fn
+  end function select_by_month_fn
 
 !------------------------------------------------------------------------------
 
-  function select_by_change_rate_fn(this, MinIncrease, MinDecrease, keep)  result(iCount)
+  function select_by_month_and_year_fn(this, iMonth, iYear, lKeep_)  result(iCount)
 
     class(T_TIME_SERIES) :: this
-    real (kind=T_SGL), optional :: MinIncrease
-    real (kind=T_SGL), optional :: MinDecrease
+    integer (kind=T_INT), intent(in) :: iMonth
+    integer (kind=T_INT), intent(in) :: iYear
+    logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
+    if(present(lKeep_)) then
+      lKeep = lKeep_
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+
+      where (this%tData%tDT%iMonth == iMonth .and. this%tData%tDT%iYear == iYear &
+           .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      endwhere
+
+    else
+
+      where (this%tData%tDT%iMonth == iMonth .and. this%tData%tDT%iYear == iYear &
+           .and. this%tData%lInclude)
+        this%tData%lSelect = lTRUE
+      elsewhere
+        this%tData%lSelect = lFALSE
+      endwhere
+
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_month_and_year_fn
+
+!------------------------------------------------------------------------------
+
+  function select_by_year_fn(this, iYear, lKeep_)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    integer (kind=T_INT) :: iYear
+    logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
+    if(present(lKeep_)) then
+      lKeep = lKeep_
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+
+      where (this%tData%tDT%iYear == iYear  .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      endwhere
+
+    else
+
+      where (this%tData%tDT%iYear == iYear  .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      elsewhere
+        this%tData%lSelect = lFALSE
+      endwhere
+
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_year_fn
+
+!------------------------------------------------------------------------------
+
+  function select_by_water_year_fn(this, iWaterYear, lKeep_)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    integer (kind=T_INT), intent(in) :: iWaterYear
+    logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
+    if(present(lKeep_)) then
+      lKeep = lKeep_
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+
+      where (this%tData%iWaterYear == iWaterYear  .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      endwhere
+
+    else
+
+      where (this%tData%iWaterYear == iWaterYear  .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      elsewhere
+        this%tData%lSelect = lFALSE
+      endwhere
+
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_water_year_fn
+
+!------------------------------------------------------------------------------
+
+  function select_by_change_rate_fn(this, rMinIncrease_, rMinDecrease_, keep)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    real (kind=T_SGL), optional :: rMinIncrease_
+    real (kind=T_SGL), optional :: rMinDecrease_
     logical (kind=T_LOGICAL), intent(in), optional :: keep
     integer (kind=T_INT) :: iCount
 
     ! [ LOCALS ]
-    real (kind=T_SGL) :: rMinIncrease_Val
-    real (kind=T_SGL) :: rMinDecrease_Val
+    real (kind=T_SGL) :: rMinIncrease
+    real (kind=T_SGL) :: rMinDecrease
     logical (kind=T_LOGICAL) :: lKeep
     integer (kind=T_INT) :: i
     real (kind=T_SGL) :: rDelta
 
     ! if no arguments supplied, assume rise rate of 10% of median flow represents
-    if(present(MinIncrease)) then
-      rMinIncrease_Val = MinIncrease
+    if(present(rMinIncrease_)) then
+      rMinIncrease = rMinIncrease_
     else
-      rMinIncrease_Val = median(this%tData%rValue) * 0.10
+      rMinIncrease = median(this%tData%rValue) * 0.10
     endif
 
-    if(present(MinDecrease)) then
-      rMinDecrease_Val = MinDecrease
+    if(present(rMinDecrease_)) then
+      rMinDecrease = rMinDecrease_
     else
-      rMinDecrease_Val = -rMinIncrease_Val
+      rMinDecrease = -rMinIncrease
     endif
 
     ! if this is TRUE, the select does not alter the status for points
@@ -668,7 +836,8 @@ contains
     if(lKeep) then
 
       do i=2,size(this%tData)
-        if( ( rDelta >= rMinIncrease_Val .or. rDelta <= rMinDecrease_Val ) ) then
+        if( ( rDelta >= rMinIncrease .or. rDelta <= rMinDecrease ) &
+           .and. this%tData(i)%lInclude ) then
           this%tData(i)%lSelect = lTRUE
         endif
       enddo
@@ -676,7 +845,8 @@ contains
     else
 
       do i=2,size(this%tData)
-        if( rDelta >= rMinIncrease_Val .or. rDelta <= rMinDecrease_Val )  then
+        if( (rDelta >= rMinIncrease .or. rDelta <= rMinDecrease) &
+             .and. this%tData(i)%lInclude )  then
           this%tData(i)%lSelect = lTRUE
         else
           this%tData(i)%lSelect = lFALSE
@@ -729,23 +899,27 @@ contains
 
     if(lKeep) then
 
-      do i=1,size(this%tData)
-        if( this%tData(i)%rValue >= rGE_Val &
-            .and. this%tData(i)%rValue <= rLE_Val ) then
-          this%tData(i)%lSelect = lTRUE
-        endif
-      enddo
+      where ( this%tData%rValue >= rGE_Val &
+                 .and. this%tData%rValue <= rLE_Val &
+                 .and. this%tData%lInclude)
+
+        this%tData%lSelect = lTRUE
+
+      endwhere
 
     else
 
-      do i=1,size(this%tData)
-        if( this%tData(i)%rValue >= rGE_Val &
-            .and. this%tData(i)%rValue <= rLE_Val ) then
-          this%tData(i)%lSelect = lTRUE
-        else
-          this%tData(i)%lSelect = lFALSE
-        endif
-      enddo
+      where ( this%tData%rValue >= rGE_Val &
+                 .and. this%tData%rValue <= rLE_Val &
+                 .and. this%tData%lInclude)
+
+        this%tData%lSelect = lTRUE
+
+      elsewhere
+
+        this%tData%lSelect = lFALSE
+
+      endwhere
 
     endif
 
@@ -980,7 +1154,7 @@ contains
          //"processing HYDRO_PEAKS block", trim(__FILE__), __LINE__)
 
       ! pare down current data set based on user inputs DATE_1 and DATE_2
-      iCount = this%selectByDate(tStartDate, tEndDate)
+      iCount = this%includeByDate(tStartDate, tEndDate)
       lSelect = lFALSE
 
       ! initialize variables needed to perform comparisons
@@ -1059,9 +1233,8 @@ contains
         ! for each identified date, we select the date range associated with
         ! the rise lag and fall lag, marking the elements for inclusion
         ! in the final output series
-        iCount = this%selectByDate(GE = tCurrentDate%decrement(rRISE_LAG), &
-                                   LE = tCurrentDate%increment(rFALL_LAG), &
-                                   keep = lTRUE)
+        iCount = this%includeByDate(GE = tCurrentDate%decrement(rRISE_LAG), &
+                                   LE = tCurrentDate%increment(rFALL_LAG))
      enddo
 
      allocate(pTempSeries, stat=iStat )
@@ -1102,10 +1275,6 @@ contains
       logical (kind=T_LOGICAL) :: lAddSuffix
       type (T_STATS_COLLECTION), pointer, save :: pStats
 
-!      real (kind=T_SGL), dimension(:), allocatable :: rTempValue
-!      type (T_DATETIME), dimension(:), allocatable :: tTempDateTime
-      type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
-
       character (len=MAXARGLENGTH), dimension(:), pointer :: &
          pNEW_SERIES_NAME, pSTATISTIC, pPERIOD
 
@@ -1134,21 +1303,9 @@ contains
       sSeriesName = this%sSeriesName
 
       ! restrict data to specified date range, if desired
-      iCount =  this%selectByDate(tStartDate, tEndDate)
+      iCount =  this%includeByDate(tStartDate, tEndDate)
       call Assert(iCount > 0, "Problem calculating PERIOD_STATISTICs: no time series data within " &
         //"specified date range", trim(__FILE__), __LINE__)
-      ! allocate memory for temporary data array
-!      allocate(rTempValue(iCount))
-!      allocate(tTempDateTime(iCount))
-!      rTempValue = pack(this%tData%rValue, this%tData%lSelect)
-!      tTempDateTime = pack(this%tData%tDT, this%tData%lSelect)
-
-      ! create a subset of data selected by user defined date range
-      allocate(tData(iCount) , stat=iStat)
-
-      call assert(iStat==0, "Problem allocating memory", &
-        trim(__FILE__), __LINE__)
-      tData = pack(this%tData, this%tData%lSelect)
 
       pSTATISTIC => pBlock%getString("STATISTIC")
       if(str_compare(pSTATISTIC(1), "NA")) pSTATISTIC(1) = "mean"
@@ -1199,8 +1356,10 @@ contains
           enddo
 
           if(.not. associated(pStats%pByMonth) ) then
-            pStats%pByMonth => calc_stats_by_month(tData%rValue, &
-                                       tData%tDT%iMonth, tData%tDT%iJulianDay)
+!            pStats%pByMonth => calc_stats_by_month(tData%rValue, &
+!                                       tData%tDT%iMonth, tData%tDT%iJulianDay)
+            pStats%pByMonth => this%statsByMonth()
+
           endif
 
           if(str_compare(pSTATISTIC(i), "sum") ) then
@@ -1264,8 +1423,13 @@ contains
         elseif(str_compare(pPERIOD(i),"month_many") ) then
 
           if(.not. associated(pStats%pByYearAndMonth) ) then
-            pStats%pByYearAndMonth => calc_stats_by_year_and_month(tData%rValue, &
-                               tData%tDT%iMonth, tData%tDT%iYear, tData%tDT%iJulianDay)
+!            pStats%pByYearAndMonth => calc_stats_by_year_and_month(tData%rValue, &
+!                               tData%tDT%iMonth, tData%tDT%iYear, tData%tDT%iJulianDay)
+!            pStats%pByYearAndMonth => calc_stats_by_year_and_month(tData%rValue, &
+!                               tData%tDT%iMonth, tData%tDT%iYear, tData%tDT%iJulianDay)
+
+            pStats%pByYearAndMonth => this%statsByMonthAndYear()
+
           endif
 
           iStatSize = count(pStats%pByYearAndMonth%lValid)
@@ -1394,8 +1558,10 @@ contains
         elseif(str_compare(pPERIOD(i),"year") ) then
 
           if(.not. associated(pStats%pByYear) ) then
-            pStats%pByYear => calc_stats_by_year(tData%rValue, &
-                                   tData%tDT%iYear, tData%tDT%iJulianDay)
+!            pStats%pByYear => calc_stats_by_year(tData%rValue, &
+!                                   tData%tDT%iYear, tData%tDT%iJulianDay)
+            pStats%pByYear => this%statsByYear()
+
           endif
 
           iStatSize = count(pStats%pByYear%lValid)
@@ -1484,6 +1650,162 @@ contains
       if (associated(pPERIOD) ) deallocate(pPERIOD)
 
   end function calculate_period_statistics_fn
+
+!------------------------------------------------------------------------------
+
+function ts_create_stats_object_fn(this, sSeriesName)  result(pStats)
+
+   class(T_TIME_SERIES) :: this
+   character (len=*), intent(in) :: sSeriesName
+   type (T_STATS_COLLECTION), pointer :: pStats
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iNumRecs
+   integer (kind=T_INT) :: iStat
+   integer (kind=T_INT) :: iFirstYear, iLastYear
+   integer (kind=T_INT) :: i, j
+   integer (kind=T_INT) :: iCount
+
+   iFirstYear = MINVAL(this%tData%tDT%iYear)
+   iLastYear = MAXVAL(this%tData%tDT%iYear)
+
+   allocate(pStats, stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for statistics collections data object")
+
+   pStats%sSeriesName = trim(sSeriesName)
+   pStats%pByYearAndMonth => this%statsByMonthAndYear()
+   pStats%pByYear => this%statsByYear()
+
+   ! select all data elements in time series object
+   call this%selectAll()
+   iCount = size(this%tData)
+
+   allocate(pStats%pAllRecords)
+
+   ! calculate base statistics for entire data period of record
+   pStats%pAllRecords = calc_base_stats(this%tData%rValue, this%tData%tDT%iJulianDay)
+
+   return
+
+end function ts_create_stats_object_fn
+
+!------------------------------------------------------------------------------
+
+function ts_calc_stats_by_month_fn(this)   result(pStatsByMonth)
+
+   class(T_TIME_SERIES) :: this
+   type (T_STATS), dimension(:), pointer :: pStatsByMonth
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: i, j
+   integer (kind=T_INT) :: iStat
+   integer (kind=T_INT) :: iCount
+   integer (kind=T_INT) :: iMonth
+
+   allocate(pStatsByMonth(12), stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for 'pStatsByMonth' statistics data object", &
+     trim(__FILE__), __LINE__)
+
+   ! calculate base statistics by month over all years
+   do iMonth=1,12
+
+     ! select a subset of the data for a given month
+     iCount = this%selectByMonth(iMonth)
+
+     if(iCount < 26) then
+       pStatsByMonth(iMonth)%lValid = lFALSE
+     else
+       pStatsByMonth(iMonth) = &
+             calc_base_stats(pack(this%tData%rValue, this%tData%tDT%iMonth == iMonth), &
+             pack(this%tData%tDT%iJulianDay, this%tData%tDT%iMonth == iMonth) )
+     endif
+
+   enddo
+
+end function ts_calc_stats_by_month_fn
+
+!------------------------------------------------------------------------------
+
+function ts_calc_stats_by_month_and_year_fn(this) result(pStatsByYearAndMonth)
+
+   class(T_TIME_SERIES) :: this
+   type (T_STATS), dimension(:,:), pointer :: pStatsByYearAndMonth
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iFirstYear, iLastYear
+   integer (kind=T_INT) :: iMonth, iYear
+   integer (kind=T_INT) :: iStat
+   integer (kind=T_INT) :: iCount
+
+   iFirstYear = MINVAL(this%tData%tDT%iYear)
+   iLastYear = MAXVAL(this%tData%tDT%iYear)
+
+   allocate(pStatsByYearAndMonth(iFirstYear:iLastYear,12), stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for 'pStatsByYearAndMonth' statistics data object", &
+     trim(__FILE__),__LINE__)
+
+   do iYear=iFirstYear,iLastYear
+
+     ! calculate monthly statistics for the current year
+     do iMonth=1,12
+
+       iCount = this%selectByMonthAndYear(iMonth, iYear)
+
+       if(iCount < 26) then
+         pStatsByYearAndMonth(iYear,iMonth)%lValid = lFALSE
+       else
+
+         pStatsByYearAndMonth(iYear,iMonth) = &
+             calc_base_stats(pack(this%tData%rValue, this%tData%tDT%iYear == iYear &
+                .and. this%tData%tDT%iMonth == iMonth ), &
+           pack(this%tData%tDT%iJulianDay, this%tData%tDT%iYear == iYear &
+                .and. this%tData%tDT%iMonth == iMonth ))
+
+       endif
+
+     enddo
+   enddo
+
+end function ts_calc_stats_by_month_and_year_fn
+
+!------------------------------------------------------------------------------
+
+function ts_calc_stats_by_year_fn(this)  result(pStatsByYear)
+
+   class(T_TIME_SERIES) :: this
+   type (T_STATS), dimension(:), pointer :: pStatsByYear
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iFirstYear, iLastYear
+   integer (kind=T_INT) :: iMonth, iYear
+   integer (kind=T_INT) :: iStat
+   integer (kind=T_INT) :: iCount
+
+   iFirstYear = MINVAL(this%tData%tDT%iYear)
+   iLastYear = MAXVAL(this%tData%tDT%iYear)
+
+   allocate(pStatsByYear(iFirstYear:iLastYear), stat=iStat)
+   call Assert( iStat == 0, &
+     "Could not allocate memory for 'pStatsByYear' statistics data object", &
+     trim(__FILE__),__LINE__)
+
+   do iYear=iFirstYear,iLastYear
+
+     iCount = this%selectByYear( iYear)
+
+     if(iCount < 350) then
+       pStatsByYear(iYear)%lValid = lFALSE
+     else
+       pStatsByYear(iYear) = &
+           calc_base_stats(pack(this%tData%rValue, this%tData%tDT%iYear == iYear), &
+           pack(this%tData%tDT%iJulianDay, this%tData%tDT%iYear == iYear))
+     endif
+
+   enddo
+
+end function ts_calc_stats_by_year_fn
 
 !------------------------------------------------------------------------------
 

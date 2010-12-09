@@ -133,80 +133,9 @@ function create_stats_object(rData, iMonth, iYear, iJulianDay, sSeriesName)  res
 
    pStats%sSeriesName = trim(sSeriesName)
 
-!   allocate(pStats%pByYear(iFirstYear:iLastYear), stat=iStat)
-!   call Assert( iStat == 0, &
-!     "Could not allocate memory for 'ByYear' statistics data object")
-
-!   allocate(pStats%pByMonth(12), stat=iStat)
-!   call Assert( iStat == 0, &
-!     "Could not allocate memory for 'ByMonth' statistics data object")
-
-   ! calculate base statistics by month over all years
-!   do i=1,12
-!     allocate(rSubset(count(iMonth==i)))
-!     allocate(iJD(count(iMonth==i)))
-!
-!     ! create a subset of the data for a given month
-!     rSubset = PACK(rData,iMonth==i)
-!     iJD = PACK(iJulianDay,iMonth==i)
-!
-!     if(size(rSubset) < 26) then
-!       pStats%pByMonth(i)%lValid = lFALSE
-!     else
-!       pStats%pByMonth(i) = calc_base_stats(rSubset, iJD)
-!     endif
-!
-!     deallocate(rSubset)
-!     deallocate(iJD)
-!   enddo
-
    pStats%pByMonth => calc_stats_by_month(rData, iMonth, iJulianDay)
-
-!   allocate(pStats%pByYearAndMonth(iFirstYear:iLastYear,12), stat=iStat)
-!   call Assert( iStat == 0, &
-!     "Could not allocate memory for 'ByYearAndMonth' statistics data object")
-!
-!   ! calculate annual statistics
-!   do i=iFirstYear,iLastYear
-!
-!     allocate(rSubset(count( iYear==i )))
-!     allocate(iJD(count( iYear==i )))
-!
-!     ! create a subset of the data for a given month/year combination
-!     rSubset = PACK(rData, iYear==i)
-!     iJD = PACK(iJulianDay, iYear==i)
-!
-!     if(size(rSubset) < 350) then
-!         pStats%pByYear(i)%lValid = lFALSE
-!       else
-!         pStats%pByYear(i) = calc_base_stats(rSubset, iJD)
-!     endif
-!
-!     deallocate(rSubset)
-!     deallocate(iJD)
-!
-!     ! calculate monthly statistics for the current year
-!     do j=1,12
-!
-!       allocate(rSubset(count(iMonth==j .and. iYear==i )))
-!       allocate(iJD(count(iMonth==j .and. iYear==i )))
-!
-!       ! create a subset of the data for a given month/year combination
-!       rSubset = PACK(rData,iMonth==j .and. iYear==i)
-!!
- !      if(size(rSubset) < 26) then
- !        pStats%pByYearAndMonth(i,j)%lValid = lFALSE
- !      else
-!         pStats%pByYearAndMonth(i,j) = calc_base_stats(rSubset, iJD)
-!       endif
-!
-!       deallocate(rSubset)
-!       deallocate(iJD)
-!     enddo
-!   enddo
-
-    pStats%pByYearAndMonth => calc_stats_by_year_and_month(rData, iMonth, iYear, iJulianDay)
-    pStats%pByYear => calc_stats_by_year(rData, iYear, iJulianDay)
+   pStats%pByYearAndMonth => calc_stats_by_year_and_month(rData, iMonth, iYear, iJulianDay)
+   pStats%pByYear => calc_stats_by_year(rData, iYear, iJulianDay)
 
    allocate(pStats%pAllRecords, stat=iStat)
    call Assert( iStat == 0, &
@@ -363,11 +292,11 @@ end function calc_stats_by_year
 
 !------------------------------------------------------------------------------
 
-function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
+function calc_base_stats(rData, iJulianDay)   result(tBaseStats)
 
    real (kind=T_SGL), dimension(:) :: rData
    integer (kind=T_INT), dimension(:) :: iJulianDay
-   type (T_STATS) :: pBaseStats
+   type (T_STATS) :: tBaseStats
 
    ! [ LOCALS ]
    integer (kind=T_INT) :: i,j,k
@@ -381,37 +310,38 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
 
 !   call quick_sort(rSortedData, iOriginalOrder)
 
-   pBaseStats%iCount = size(rData)
+   tBaseStats%iCount = size(rData)
 
-   pBaseStats%rSum = sum(rData)
+   tBaseStats%rSum = sum(rData)
 
-!   pBaseStats%rMedian = median(rData)
+!   tBaseStats%rMedian = median(rData)
 
-   pBaseStats%rMean = mean(rData)
-   pBaseStats%rVariance = variance(rData)
+   tBaseStats%rMean = mean(rData)
+   tBaseStats%rVariance = variance(rData)
 
-   pBaseStats%rStddev = sqrt(pBaseStats%rVariance)
-   if(pBaseStats%rMean /= 0.) pBaseStats%rCV = pBaseStats%rStddev / pBaseStats%rMean
+   tBaseStats%rStddev = sqrt(tBaseStats%rVariance)
+   if(tBaseStats%rMean /= 0.) tBaseStats%rCV = tBaseStats%rStddev / tBaseStats%rMean
 
 !   do i=1,iNUM_QUANTILES
-!     pBaseStats%rQuantile(i) = quantile(rSTD_PROBABILITIES(i), rSortedData)
-!     pBaseStats%rExceedance(iNUM_QUANTILES - i + 1) = pBaseStats%rQuantile(i)
+!     tBaseStats%rQuantile(i) = quantile(rSTD_PROBABILITIES(i), rSortedData)
+!     tBaseStats%rExceedance(iNUM_QUANTILES - i + 1) = tBaseStats%rQuantile(i)
 !   end do
 
-   pBaseStats%rQuantile = quantiles(rSTD_PROBABILITIES, rData)
-   pBaseStats%rMedian = pBaseStats%rQuantile(P50)
+   tBaseStats%rQuantile = quantiles(rSTD_PROBABILITIES, rData)
+   tBaseStats%rExceedance = 1.0 - tBaseStats%rQuantile
+   tBaseStats%rMedian = tBaseStats%rQuantile(P50)
 
-   pBaseStats%rMin = MINVAL(rData)
-   pBaseStats%rMax = MAXVAL(rData)
-   pBaseStats%rRange = pBaseStats%rMax - pBaseStats%rMin
+   tBaseStats%rMin = MINVAL(rData)
+   tBaseStats%rMax = MAXVAL(rData)
+   tBaseStats%rRange = tBaseStats%rMax - tBaseStats%rMin
    iLocMin = MINLOC(rData)
    iLocMax = MAXLOC(rData)
 
-   pBaseStats%iDayOfYearMin = day_of_year(iJulianDay(iLocMin(1)))
-   pBaseStats%iDayOfYearMax = day_of_year(iJulianDay(iLocMax(1)))
+   tBaseStats%iDayOfYearMin = day_of_year(iJulianDay(iLocMin(1)))
+   tBaseStats%iDayOfYearMax = day_of_year(iJulianDay(iLocMax(1)))
 
-   pBaseStats%rPeriodMax = 1.e-20
-   pBaseStats%rPeriodMin = 1.e+20
+   tBaseStats%rPeriodMax = 1.e-20
+   tBaseStats%rPeriodMin = 1.e+20
 
    if(size(rData) >= 365) then
      iMaxPeriodIndex = D90
@@ -428,12 +358,12 @@ function calc_base_stats(rData, iJulianDay)   result(pBaseStats)
      do j=1,size(rData) - AVERAGING_PERIOD(i)%iDaysInPeriod + 1
        k = j + AVERAGING_PERIOD(i)%iDaysInPeriod - 1
        rMean = SUM(rData(j:k)) / AVERAGING_PERIOD(i)%iDaysInPeriod
-       if (rMean > pBaseStats%rPeriodMax(i)) pBaseStats%rPeriodMax(i) = rMean
-       if (rMean < pBaseStats%rPeriodMin(i)) pBaseStats%rPeriodMin(i) = rMean
+       if (rMean > tBaseStats%rPeriodMax(i)) tBaseStats%rPeriodMax(i) = rMean
+       if (rMean < tBaseStats%rPeriodMin(i)) tBaseStats%rPeriodMin(i) = rMean
      end do
    end do
 
-   pBaseStats%lValid = lTRUE
+   tBaseStats%lValid = lTRUE
 
    return
 
@@ -545,7 +475,6 @@ function compute_hyd_indices_MA(pStats)  result(MA)
 
    rMeanAnnualFlowTS = PACK(pStats%pByYear(:)%rMean, &
                                pStats%pByYear(:)%lValid)
-
 
    write(*,*) "      PROB  Q(mon mean TS) Q(ann mean TS)"
    write (*,*)"---------------------------------------------"

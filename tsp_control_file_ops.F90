@@ -158,7 +158,7 @@ end subroutine close_file_sub
 
 !------------------------------------------------------------------------------
 
-!> @brief This function READS thenext TSPROC block and returns a pointer
+!> @brief This function READS the next TSPROC block and returns a pointer
 !> to the arguments contained in that block. Line numbers of the individual
 !> keywords are preserved within the \c iLineNum attribute of the block.
 !>

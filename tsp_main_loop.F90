@@ -1182,7 +1182,7 @@ subroutine reduce_time_span(sSeriesname, sStartdate, sEnddate)
 
     ! get pointer to series of interest; restrict to specified date
     pTempSeries => TS%getSeries( sSeriesName )
-    iCount = pTempSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+    iCount = pTempSeries%includeByDate( tDATETIME_1, tDATETIME_2)
     allocate(pNewSeries%tData(iCount))
 
     ! transfer selected data over to new series
@@ -1425,8 +1425,8 @@ subroutine series_compare(sObservedSeries_, sModeledSeries_, sNewTableName_, &
     pModeledSeries => TS%getSeries( sModeledSeries )
     if(len_trim(sBaseSeries) > 0) pBaseSeries => TS%getSeries( sBaseSeries )
     ! select values within a date range specified by the user
-    iCount1 = pObservedSeries%selectByDate( tDATETIME_1, tDATETIME_2)
-    iCount2 = pModeledSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+    iCount1 = pObservedSeries%includeByDate( tDATETIME_1, tDATETIME_2)
+    iCount2 = pModeledSeries%includeByDate( tDATETIME_1, tDATETIME_2)
 
     call assert(iCount1 == iCount2,"Observed and modeled series cannot be compared " &
       //"because they have unequal numbers of elements", trim(__FILE__), __LINE__)
@@ -1439,7 +1439,7 @@ subroutine series_compare(sObservedSeries_, sModeledSeries_, sNewTableName_, &
 
     if(associated(pBaseSeries) ) then
 
-      iCount3 = pBaseSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+      iCount3 = pBaseSeries%includeByDate( tDATETIME_1, tDATETIME_2)
 
       call assert(iCount3 == iCount1,"Base series does not have the same " &
         //"number of elements as observed and modeled series in block beginning at " &
@@ -1669,12 +1669,12 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
 
     ! get pointer to series of interest; restrict to specified date
     pTempSeries => TS%getSeries( sSeriesName )
-    iCount = pTempSeries%selectByDate( tDATETIME_1, tDATETIME_2)
+    iCount = pTempSeries%includeByDate( tDATETIME_1, tDATETIME_2)
     allocate(pNewSeries_BF%tData(iCount))
 !    allocate(pNewSeries_SF%tData(iCount))
 
-    pNewSeries_BF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
-!    pNewSeries_SF%tData = pack(pTempSeries%tData, pTempSeries%tData%lSelect)
+    pNewSeries_BF%tData = pack(pTempSeries%tData, pTempSeries%tData%lInclude)
+!    pNewSeries_SF%tData = pack(pTempSeries%tData, pTempSeries%tData%lInclude)
 
     if(iInterval < 3 .or. iInterval > 11 .or. mod(iInterval,2) /=1) then
       call warn(lFALSE,"Interval must be in the set [3,5,7,9,11]. You entered " &
@@ -1685,16 +1685,25 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     ! make call to appropriate baseflow calculation routine
     select case ( iHYSEP_TYPE )
       case(iFIXED_INTERVAL)
-        call fixed(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lSelect), &
+        call fixed(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lInclude), &
                   iInterval,1,0,pNewSeries_BF%tData%rValue)
+        pNewSeries_BF%sDescription = &
+          quote(pNewSeries_BF%sSeriesName)//" - fixed interval hydrograph seperation" &
+          //" derived from series "//quote(sSeriesName)
 
       case(iSLIDING_INTERVAL)
-        call slide(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lSelect), &
+        call slide(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lInclude), &
                   iInterval,pNewSeries_BF%tData%rValue)
+        pNewSeries_BF%sDescription = &
+          quote(pNewSeries_BF%sSeriesName)//" - sliding interval hydrograph seperation" &
+          //" derived from series "//quote(sSeriesName)
 
       case(iLOCAL_MINIMUM)
-        call locmin(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lSelect), &
+        call locmin(iCount,pack(pTempSeries%tData%rValue, pTempSeries%tData%lInclude), &
                   iInterval,pNewSeries_BF%tData%rValue)
+        pNewSeries_BF%sDescription = &
+          quote(pNewSeries_BF%sSeriesName)//" - local minimum hydrograph seperation" &
+          //" derived from series "//quote(sSeriesName)
 
       case default
         call Assert(lFALSE, "Internal logic error - failed to match appropriate" &
@@ -1708,10 +1717,6 @@ subroutine usgs_hysep(sInputSeriesname, sHysepType, sTimeInterval, sStartdate, s
     ! ensure that new series have the date range populated
     call pNewSeries_BF%findDateMinAndMax()
 !    call pNewSeries_SF%findDateMinAndMax()
-
-    pNewSeries_BF%sDescription = &
-      "USGS HYSEP (hydrograph seperation) derived from series "//quote(sSeriesName)
-
 
     ! add new series to TS collection
     call TS%insert(pNewSeries=pNewSeries_BF)
