@@ -1823,7 +1823,7 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
 
    ! [ LOCALS ]
    integer (kind=T_INT) :: iFirstYear, iLastYear, iCenterYear
-   integer (kind=T_INT) :: iMonth, iYear, n
+   integer (kind=T_INT) :: iMonth, iYear, n, i
    integer (kind=T_INT) :: iStat
    integer (kind=T_INT) :: iCount
    integer (kind=T_INT) :: iNumValid
@@ -2017,7 +2017,8 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
    ! from the final time series
    iNumValid = count(tData%lValid)
    allocate(pTS%tData(iNumValid) )
-   pTS%tData = pack(pTS%tData,pTS%tData%lValid)
+   pTS%tData = pack(tData,tData%lValid)
+
    call pTS%findDateMinAndMax()
 
 end function ts_calc_stat_by_period_fn
