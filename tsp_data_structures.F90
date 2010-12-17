@@ -38,7 +38,8 @@ module tsp_data_structures
   real (kind=T_SGL), public, parameter :: rNODATA = -99999.0_T_SGL
   real (kind=T_INT), public, parameter :: iNODATA = -99999_T_INT
 
-  logical (kind=T_LOGICAL) :: lAssertAlwaysFatal = lTRUE
+  logical, public, parameter :: lVERBOSE = lFALSE
+  logical (kind=T_LOGICAL) :: lLOGFILE_OPEN = lFALSE
 
   character (len=1) :: cTAB = ACHAR(9)
   character (len=1) :: cRETURN = ACHAR(13)

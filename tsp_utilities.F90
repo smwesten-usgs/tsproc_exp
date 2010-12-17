@@ -50,11 +50,10 @@ module tsp_utilities
   interface chomp
     module procedure chomp_delim_sub
     module procedure chomp_default_sub
+!    module procedure chomp_classic
   end interface
 
 contains
-
-
 
 !------------------------------------------------------------------------------
 
@@ -498,6 +497,8 @@ end function dbl2char_wsf
             status='REPLACE',iostat=iStat)
     end if
 
+    lLOGFILE_OPEN = lTRUE
+
     call Assert(iStat==0, "Problem opening TSPROC logfile " &
       //quote(sFilenameText), trim(__FILE__), __LINE__)
 
@@ -562,9 +563,10 @@ end function dbl2char_wsf
     flush(unit=LU_REC)
     close(unit=LU_REC)
 
+    lLOGFILE_OPEN = lFALSE
+
   end subroutine closelog
 
-!------------------------------------------------------------------------------
 
 !--------------------------------------------------------------------------
 
@@ -685,45 +687,39 @@ subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
   character (len=*), intent(in) :: sErrorMessage
   character (len=*), optional :: sFilename
   integer (kind=T_INT), optional :: iLineNo
-
-  logical :: lFileOpen
+  character (len=len(sErrorMessage)) :: sRecord
+  character (len=256) :: sItem
 
   if ( .not. lCondition ) then
 
-    if(lAssertAlwaysFatal) then
-      print *
-      print *,'FATAL ERROR - HALTING TSPROC'
-      print *,trim(sErrorMessage)
-      print *
-      if(present(sFilename)) print *,"module: ", trim(sFilename)
-      if(present(iLineNo)) print *,"line no.: ",iLineNo
-    else
-      print *, "TSPROC error:"
-      print *,trim(sErrorMessage)
-    endif
+    sRecord = sErrorMessage
+    write(unit=LU_STD_OUT, fmt=*)
+    write(UNIT=LU_STD_OUT,FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
+    do
+      call chomp(sRecord, sItem, "~")
+      if(len_trim(sItem) == 0) exit
+      write(UNIT=LU_STD_OUT,FMT="(a)") trim(sItem)
+    enddo
 
-      ! echo error condition to the log file ONLY if it is open!
-      !
-      ! ACHTUNG!! inquire is poorly supported under GFORTRAN - need to look at alternatives
-      !
-      inquire (unit=LU_REC, opened=lFileOpen)
+    if(present(sFilename)) write(UNIT=LU_STD_OUT,FMT="(/,a)") &
+      "module: "//trim(sFilename)
+    if(present(iLineNo)) write(UNIT=LU_STD_OUT,FMT="(a)") &
+      "line number: "//trim(asChar(iLineNo))
 
-      if(lFileOpen) then
+    if(lLOGFILE_OPEN) then
+      write(UNIT=LU_REC,FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
+      do
+        call chomp(sRecord, sItem, "~")
+        if(len_trim(sItem) == 0) exit
+        write(UNIT=LU_REC,FMT="(a)") trim(sItem)
+      enddo
+      if(present(sFilename)) write(UNIT=LU_REC,FMT="(/,a)") &
+        "module: "//trim(sFilename)
+      if(present(iLineNo)) write(UNIT=LU_REC,FMT="(a)") &
+        "line number: "//trim(asChar(iLineNo))
+    end if
 
-        if(lAssertAlwaysFatal) then
-          write(UNIT=LU_REC,FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
-          write(UNIT=LU_REC,FMT="(a,/)") trim(sErrorMessage)
-          if(present(sFilename)) write(UNIT=LU_REC,FMT=*) "module: ", &
-             trim(sFilename)
-          if(present(iLineNo)) write(UNIT=LU_REC,FMT=*) "line no.: ",iLineNo
-        else
-          write(UNIT=LU_REC,FMT="(a)") 'TSPROC error'
-          write(UNIT=LU_REC,FMT="(a,/)") trim(sErrorMessage)
-        endif
-
-      end if
-
-    if(lAssertAlwaysFatal) stop
+    stop
 
   end if
 
@@ -747,9 +743,7 @@ subroutine Warn(lCondition,sWarningMessage,sFilename,iLineNo)
       if(present(iLineNo)) print *,"   line no.: ",iLineNo
       print *
 
-      ! echo error condition to the log file ONLY if it is open!
-      inquire (unit=LU_REC, opened=lFileOpen)
-      if(lFileOpen) then
+      if(lLOGFILE_OPEN) then
 
         write(UNIT=LU_REC,FMT=*) ' *** WARNING ***'
         write(UNIT=LU_REC,FMT=*) trim(sWarningMessage)
@@ -759,6 +753,7 @@ subroutine Warn(lCondition,sWarningMessage,sFilename,iLineNo)
         write(UNIT=LU_REC,FMT=*)
 
       end if
+
   end if
 
   return
@@ -944,19 +939,19 @@ subroutine Chomp_delim_sub(sRecord, sItem, sDelimiters)
   integer (kind=T_INT) :: iLen
 
   ! eliminate any leading spaces
-  sRecord = adjustl(sRecord)
+!  sRecord = adjustl(sRecord)
   ! find the end position of 'sRecord'
   iLen = len_trim(sRecord)
 
-  ! find first occurrance of delimiter
+  ! find the POSITION of the first delimiter found
   iR = SCAN(trim(sRecord),sDelimiters)
-  ! find *next* occurance of *NON*-delimiter (needed to skip over multiple delimiters)
-  iB = verify(string = sRecord(max(iR,1):iLen), set = sDelimiters)
 
   if(iR==0) then
     sItem = trim(sRecord)   ! no delimiters found; return entirety of sRecord
     sRecord = ""            ! as sItem
   else
+    ! find *next* occurance of *NON*-delimiter (needed to skip over multiple delimiters)
+    iB = verify(string = sRecord(max(iR,1):iLen), set = sDelimiters)
     sItem = trim(sRecord(1:iR-1))
     sRecord = trim(sRecord(iR+iB-1:))
   end if
@@ -993,6 +988,38 @@ subroutine Chomp_default_sub(sRecord, sItem)
   end if
 
 end subroutine Chomp_default_sub
+
+!------------------------------------------------------------------------------
+
+subroutine Chomp_classic(sRecord, sItem)
+
+  ! ARGUMENTS
+  character (len=*), intent(inout) :: sRecord
+  character (len=256), intent(out) :: sItem
+  ! LOCALS
+  integer (kind=T_INT) :: iR                      ! Index in sRecord
+  integer (kind=T_INT) :: iS                      ! Index in sItem
+  logical (kind=T_LOGICAL) :: lSkip               ! TRUE while skipping spaces
+
+  ! Set my pointers and remove leading and trailing spaces
+  iR = 1
+  iS = 1
+  sItem = ""
+  lSkip = lTRUE
+  do iR=1,len_trim(sRecord)
+      if ( lSkip .and. sRecord(iR:iR) == " " ) then
+          cycle
+      else if ( .not. lSkip .and. sRecord(iR:iR) == " " ) then
+          exit
+      else
+          lSkip = lFALSE
+          sItem(iS:iS) = sRecord(iR:iR)
+          iS = iS+1
+      end if
+  end do
+  sRecord = adjustl(sRecord(iR:))
+
+end subroutine Chomp_classic
 
 !------------------------------------------------------------------------------
 

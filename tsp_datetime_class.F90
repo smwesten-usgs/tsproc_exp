@@ -12,7 +12,8 @@ module tsp_datetime_class
     integer (kind=T_BYTE) :: iHour = 0
     integer (kind=T_BYTE) :: iMinute = 0
     integer (kind=T_BYTE) :: iSecond = 0
-    integer (kind=T_SHORT) :: iWaterYear
+    integer (kind=T_SHORT) :: iWaterYearHigh
+    integer (kind=T_SHORT) :: iWaterYearLow
 !    real (kind=T_DBL)    :: rJulianDay
     integer (kind=T_INT) :: iJulianDay
     real (kind=T_SGL) :: rFractionOfDay
@@ -102,22 +103,23 @@ module tsp_datetime_class
   type T_MONTH
     character (len=3) :: sAbbreviation
     character (len=12) :: sName
+    integer (kind=T_INT) :: iNumDays
   end type T_MONTH
 
   ! constants for converting month numbers to month names
   type (T_MONTH),dimension(12), public :: MONTH = (/ &
-    T_MONTH('JAN', 'January'), &
-    T_MONTH('FEB', 'February'), &
-    T_MONTH('MAR', 'March'), &
-    T_MONTH('APR', 'April'), &
-    T_MONTH('MAY', 'May'), &
-    T_MONTH('JUN', 'June'), &
-    T_MONTH('JUL', 'July'), &
-    T_MONTH('AUG', 'August'), &
-    T_MONTH('SEP', 'September'), &
-    T_MONTH('OCT', 'October'), &
-    T_MONTH('NOV', 'November'), &
-    T_MONTH('DEC', 'December') &
+    T_MONTH('JAN', 'January', 31), &
+    T_MONTH('FEB', 'February', 28), &
+    T_MONTH('MAR', 'March', 31), &
+    T_MONTH('APR', 'April', 30), &
+    T_MONTH('MAY', 'May', 31), &
+    T_MONTH('JUN', 'June', 30), &
+    T_MONTH('JUL', 'July', 31), &
+    T_MONTH('AUG', 'August', 31), &
+    T_MONTH('SEP', 'September', 30), &
+    T_MONTH('OCT', 'October', 31), &
+    T_MONTH('NOV', 'November', 30), &
+    T_MONTH('DEC', 'December', 31) &
    /)
 
   ! the following values are determined by the date format string; defaults to MM/DD/YYYY
@@ -261,7 +263,8 @@ subroutine parse_text_to_date_sub(this, sString)
     sMonth = trim(sBuf)
   endif
   read(sMonth,fmt=*, iostat = iStat) iMonth
-  call Assert(iStat==0, "Error parsing month value from text file - got "//trim(sBuf)//";"// &
+  call Assert(iStat==0 .and. (iMonth > 0 .and. iMonth <= 12), &
+    "Error parsing month value from text file - got "//trim(sMonth)//";"// &
     " date text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
   sDay = sStr( iScanDD1 - iMonthOffset : iScanDD2 -iMonthOffset )
@@ -271,15 +274,16 @@ subroutine parse_text_to_date_sub(this, sString)
     sDay = trim(sBuf)
   endif
   read(sDay, fmt=*, iostat = iStat) iDay
-  call Assert(iStat==0, "Error parsing day value from text file - got "//trim(sBuf)//";"// &
+  call Assert(iStat==0 .and. (iDay > 0 .and. iDay <= 31), &
+    "Error parsing day value from text file - got "//trim(sDay)//";"// &
     " date text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
-  sBuf = sStr( iScanYYYY1 - iMonthOffset - iDayOffset: iScanYYYY2 - iMonthOffset - iDayOffset)
-  read(sBuf,fmt=*, iostat = iStat) iYear
-  call Assert(iStat==0, "Error parsing year value from text file - got "//trim(sBuf)//";"// &
+  sYear = sStr( iScanYYYY1 - iMonthOffset - iDayOffset: iScanYYYY2 - iMonthOffset - iDayOffset)
+  read(sYear,fmt=*, iostat = iStat) iYear
+  call Assert(iStat==0, "Error parsing year value from text file - got "//trim(sYear)//";"// &
     " date text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
-  if(iYear <= 99 ) iYear = iYear + 1900    ! this might be a lethal assumption
+!  if(iYear <= 99 ) iYear = iYear + 1900    ! this might be a lethal assumption
 
   this%iMonth = iMonth
   this%iYear = iYear
@@ -321,18 +325,18 @@ subroutine parse_text_to_time_sub(this, sString)
     sHour = trim(sBuf)
   endif
   read(sHour,fmt=*, iostat = iStat) iHour
-  call Assert(iStat==0, "Error parsing hour value from text file - got "//trim(sBuf)//";"// &
+  call Assert(iStat==0, "Error parsing hour value from text file - got "//trim(sHour)//";"// &
     " time text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
   sMinute = sStr(iScanMin1 - iOffset : iScanMin2 - iOffset )
   read(sMinute,fmt=*, iostat = iStat) iMinute
-  call Assert(iStat==0, "Error parsing minutes value from text file - got "//trim(sBuf)//";"// &
+  call Assert(iStat==0, "Error parsing minutes value from text file - got "//trim(sMinute)//";"// &
     " time text: "//trim(sStr), TRIM(__FILE__),__LINE__)
 
   if(iScanSec1 /= 0) then
     sSecond = sStr(iScanSec1 - iOffset : iScanSec2 - iOffset )
     read(sSecond,fmt=*, iostat = iStat) iSecond
-    call Assert(iStat==0, "Error parsing hour value from text file - got "//trim(sBuf)//";"// &
+    call Assert(iStat==0, "Error parsing hour value from text file - got "//trim(sSecond)//";"// &
       " time text: "//trim(sStr), TRIM(__FILE__),__LINE__)
   else
     iSecond = 0
@@ -351,11 +355,17 @@ subroutine calc_water_year_sub(this)
   class (T_DATETIME) :: this
 
     if(this%iMonth > 9) then
-       this%iWaterYear = this%iYear + 1
+       this%iWaterYearHigh = this%iYear + 1
     else
-       this%iWaterYear = &
+       this%iWaterYearHigh = &
        this%iYear
     end if
+
+    if(this%iMonth < 4) then
+      this%iWaterYearLow = this%iYear - 1
+    else
+      this%iWaterYearLow = this%iYear
+    endif
 
 end subroutine calc_water_year_sub
 
@@ -984,6 +994,48 @@ function num_days_in_year(iYear) result(iNumDaysInYear)
   iNumDaysInYear = iLastDay - iFirstDay + 1
 
 end function num_days_in_year
+
+!--------------------------------------------------------------------------
+!!****f* types/num_days_in_month
+! NAME
+!   num_days_in_month - Return the number of days in the given month.
+!
+! SYNOPSIS
+!   This function simply returns the number of days given the current month.
+!
+! INPUTS
+!   iYear   4-digit year
+!   iMonth  2-digit month
+!
+! OUTPUTS
+!   iNumDaysInMonth - integer number of days in month
+!
+! SOURCE
+
+function num_days_in_month(iMonth, iYear) result(iNumDaysInMonth)
+
+  integer (kind=T_INT), intent(in) :: iMonth
+  integer (kind=T_INT), intent(in) :: iYear
+  integer (kind=T_INT) :: iNumDaysInMonth
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iFirstDay
+  integer (kind=T_INT) :: iNewDay, iNewMonth, iNewYear, iYesterday
+  integer (kind=T_INT) :: iJD
+
+  ! first day to begin searching for end of month
+  iFirstDay = julian_day ( iYear, iMonth, 27 )
+  iYesterday = 27
+
+  do iJD = iFirstDay,iFirstDay + 5
+    call gregorian_date(iJD + 1, iNewYear, iNewMonth, iNewDay)
+    if(iNewMonth /= iMonth) exit
+    iYesterday = iNewDay
+  enddo
+
+  iNumDaysInMonth = iYesterday
+
+end function num_days_in_month
 
 !--------------------------------------------------------------------------
 

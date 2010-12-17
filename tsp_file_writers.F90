@@ -35,7 +35,7 @@ contains
     integer (kind=T_INT) :: iStat    ! holds status return code on file i/o
     integer (kind=T_INT) :: iCount
 
-    type (T_DATETIME) :: tStartDate, tEndDate
+    real (kind=T_DBL) :: rStart, rFinish
 
 !    close(unit=LU_LIST_OUTPUT)
 !    close(unit=LU_INSTRUCTIONS_FILE)
@@ -54,27 +54,39 @@ contains
     sMostRecentInstructionFile = TRIM(sInstructionsFilename)
     write(unit=LU_INSTRUCTIONS_FILE, fmt="(a)") "pif $"
 
+
+
+
+
     ! write LIST OUTPUT for TIME SERIES objects
     pSERIES_NAME => pBlock%getString("SERIES_NAME")
     if(.not. str_compare(pSERIES_NAME(1),"NA") ) then
-
-      iCount = 0
-      allocate(sSeriesName(size(pSERIES_NAME)), iOrder(size(pSERIES_NAME) )  )
-      sSeriesName = pSERIES_NAME
-!      iKeys = makeKey(pSERIES_NAME)
-      call quick_sort(sSeriesName, iOrder)
-
-      pTS => TS%pTS_Head
-      do
-        if( .not. associated(pTS) ) exit
-        iCount = iCount + 1
-        if( isKeyInList(sSeriesName, pTS%sSeriesName) ) then
-          call pTS%list( iLU = LU_LIST_OUTPUT)
-!          call pTS%writeInstructions( iLU = LU_INSTRUCTIONS_FILE)
-        endif
-        pTS => pTS%pNext
+      do i=1,size(pSERIES_NAME)
+        pTS => TS%getSeries(pSERIES_NAME(i))
+        call pTS%list( iLU = LU_LIST_OUTPUT)
+!        call pTS%writeInstructions( iLU = LU_INSTRUCTIONS_FILE)
       enddo
+    endif
 
+
+
+!       iCount = 0
+!       allocate(sSeriesName(size(pSERIES_NAME)), iOrder(size(pSERIES_NAME) )  )
+!       sSeriesName = pSERIES_NAME
+! !      iKeys = makeKey(pSERIES_NAME)
+!       call quick_sort(sSeriesName, iOrder)
+!
+!       pTS => TS%pTS_Head
+!       do
+!         if( .not. associated(pTS) ) exit
+!         iCount = iCount + 1
+!         if( isKeyInList(sSeriesName, pTS%sSeriesName) ) then
+!           call pTS%list( iLU = LU_LIST_OUTPUT)
+! !          call pTS%writeInstructions( iLU = LU_INSTRUCTIONS_FILE)
+!         endif
+!         pTS => pTS%pNext
+!       enddo
+!
 !      do i=1,size(pSERIES_NAME)
 !        call tStartDate%systime()
 !        pTS => TS%getSeries(pSERIES_NAME(i))
@@ -86,7 +98,7 @@ contains
 !        call pTS%writeInstructions( iLU = LU_INSTRUCTIONS_FILE)
 !        call tEndDate%systime()
 !      enddo
-    endif
+!    endif
 
 !    if(associated(TS%pTS)) then
 !      iSize = size(TS%pTS)     ! get the number of T_TIME_SERIES objects

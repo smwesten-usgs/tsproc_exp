@@ -95,6 +95,7 @@ module tsp_collections
     procedure :: pestWriteTableComparison => pest_write_table_comparison_sub
     procedure :: listTable => list_output_table_sub
     procedure :: datesEqual => are_datetime_stamps_identical_fn
+    procedure :: datesEqualByName => are_datetime_stamps_identical_names_fn
 
   end type TIME_SERIES_COLLECTION
 
@@ -906,10 +907,11 @@ recursive subroutine traverse_tree_summarize_series_sub(this, pCurrent)
        pCurrent%pTS%sSeriesName, &
        pCurrent%pTS%tStartDate%prettyDate(), &
        pCurrent%pTS%tEndDate%prettyDate(), &
-       size(pCurrent%pTS%tData), &
-       MINVAL(pCurrent%pTS%tData%rValue), &
-       SUM(pCurrent%pTS%tData%rValue)/ size(pCurrent%pTS%tData), &
-       MAXVAL(pCurrent%pTS%tData%rValue), &
+       count(pCurrent%pTS%tData%lValid), &
+       MINVAL(pCurrent%pTS%tData%rValue, pCurrent%pTS%tData%lValid), &
+       SUM(pCurrent%pTS%tData%rValue, pCurrent%pTS%tData%lValid) &
+           / count(pCurrent%pTS%tData%lValid), &
+       MAXVAL(pCurrent%pTS%tData%rValue, pCurrent%pTS%tData%lValid), &
        iMemoryInBytes / 1024
    endif
 
@@ -953,7 +955,7 @@ end subroutine traverse_tree_summarize_table_sub
 !! This function procedure searches a binary search tree for the given element KEY.  It
 !! returns the location of the element, or a null pointer if the element could not be found.
 function find_node_in_tree_fn (this,sNodeName)   result (sPosition)
-   !! INCOMINQ:   Key    = the given value to be matched with an element of the tree.
+   !! INCOMING:   Key    = the given value to be matched with an element of the tree.
    !!       Root  = a pointer to the root of the tree to be searched.
    !! RETURNS: A pointer to the element (if Key is found in the tree), or a null pointer (if not found)
 
@@ -1809,11 +1811,13 @@ TREE_CLIMBINQ_LOOQ:                 &
         pNewNode%pTS => pNewSeries
         pNewNode%sNodeName = trim(adjustl(pNewSeries%sSeriesName) )
         this%iNumTimeSeries = this%iNumTimeSeries + 1
-        call echolog("  Added: "//trim(pNewSeries%sDescription)//".")
-        call echolog("    [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
-           //pNewSeries%tEndDate%listdate()//" ]")
-        call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
-        call echolog("")
+        if(lVERBOSE) then
+          call echolog("  Added: "//trim(pNewSeries%sDescription)//".")
+          call echolog("    [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
+             //pNewSeries%tEndDate%listdate()//" ]")
+          call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
+          call echolog("")
+        endif
       endif
     endif
 
@@ -1822,11 +1826,13 @@ TREE_CLIMBINQ_LOOQ:                 &
         pNewNode%pTable => pNewTable
         pNewNode%sNodeName = trim(adjustl(pNewTable%sSeriesName) )
         this%iNumTables = this%iNumTables + 1
-        call echolog("  Added: "//trim(pNewTable%sDescription)//".")
-        call echolog("    [ date range: "//pNewTable%tStartDate%listdate()//" to " &
-           //pNewTable%tEndDate%listdate()//" ]")
-        call echolog("    [There are now "//trim(asChar(this%iNumTables))//" tables in memory.]")
-        call echolog("")
+        if(lVERBOSE) then
+          call echolog("  Added: "//trim(pNewTable%sDescription)//".")
+          call echolog("    [ date range: "//pNewTable%tStartDate%listdate()//" to " &
+             //pNewTable%tEndDate%listdate()//" ]")
+          call echolog("    [There are now "//trim(asChar(this%iNumTables))//" tables in memory.]")
+          call echolog("")
+        endif
       endif
     endif
 
@@ -2144,10 +2150,10 @@ TREE_CLIMBINQ_LOOQ:                 &
           pNext => pCurrent%pNext
           if(associated(pNext)) pNext%pPrevious => pCurrent%pPrevious
           deallocate(pCurrent%tData, stat=iStat)
-          call Assert(iStat==0, "Qroblem deallocating memory while removing a time series", &
+          call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
             trim(__FILE__), __LINE__)
           deallocate(pCurrent, stat=iStat)
-          call Assert(iStat==0, "Qroblem deallocating memory while removing a time series", &
+          call Assert(iStat==0, "Problem deallocating memory while removing a time series", &
             trim(__FILE__), __LINE__)
 
           lMatch = lTRUE
@@ -2226,10 +2232,10 @@ TREE_CLIMBINQ_LOOQ:                 &
           pNext => pCurrent%pNext
           if(associated(pNext)) pNext%pPrevious => pCurrent%pPrevious
           deallocate(pCurrent%tTableData, stat=iStat)
-          call Assert(iStat==0, "Qroblem deallocating memory while removing a table", &
+          call Assert(iStat==0, "Problem deallocating memory while removing a table", &
             trim(__FILE__), __LINE__)
           deallocate(pCurrent, stat=iStat)
-          call Assert(iStat==0, "Qroblem deallocating memory while removing a table", &
+          call Assert(iStat==0, "Problem deallocating memory while removing a table", &
             trim(__FILE__), __LINE__)
 
           lMatch = lTRUE
@@ -2947,14 +2953,14 @@ TREE_CLIMBINQ_LOOQ:                 &
 !     endif
 
 
-    write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSQROC TIME SERIES and TABLE COMQARISON OBJECTS CURRENTLY IN MEMORY ***'
+    write(LU_STD_OUT,fmt="(/,/,a,/)") '*** TSPROC TIME SERIES and TABLE COMPARISON OBJECTS CURRENTLY IN MEMORY ***'
     write(LU_STD_OUT, &
       fmt="(/,'OBSERVED SERIES',t19,'MODELED SERIES',t38,'DATE RANGE',t60,'COUNT'," &
          //"t76,'RESIDUAL',/)")
 
     if(.not. allocated(this%tTSComparison)) then
       write(LU_STD_OUT,fmt="(a)") &
-        '     ===> No TIME SERIES COMQARISON objects currently in memory <==='
+        '     ===> No TIME SERIES COMPARISON objects currently in memory <==='
 
     else
 
@@ -2989,7 +2995,7 @@ TREE_CLIMBINQ_LOOQ:                 &
          //"t76,'RESIDUAL',/)")
     if(.not. allocated(this%tTableComparison)) then
       write(LU_STD_OUT,fmt="(a,/)") &
-        '     ===> No TABLE COMQARISON objects currently in memory <==='
+        '     ===> No TABLE COMPARISON objects currently in memory <==='
 
     else
 
@@ -3067,10 +3073,10 @@ TREE_CLIMBINQ_LOOQ:                 &
         pTS%sSeriesName, &
         pTS%tStartDate%prettyDate(), &
         pTS%tEndDate%prettyDate(), &
-        size(pTS%tData), &
-        MINVAL(pTS%tData%rValue), &
-        SUM(pTS%tData%rValue)/ size(pTS%tData), &
-        MAXVAL(pTS%tData%rValue), &
+        count(pTS%tData%lValid), &
+        MINVAL(pTS%tData%rValue,pTS%tData%lValid), &
+        SUM(pTS%tData%rValue,pTS%tData%lValid)/ count(pTS%tData%lValid), &
+        MAXVAL(pTS%tData%rValue,count(pTS%tData%lValid)), &
         iMemoryInBytes / 1024
 
     else
@@ -3258,7 +3264,7 @@ TREE_CLIMBINQ_LOOQ:                 &
    call Assert(len_trim(sSeriesname) > 0, &
      "internal error: must provide 'sSeriesname'", trim(__FILE__),__LINE__)
    call Assert(len_trim(sTimeBasename) > 0, &
-     "internal error: must provide 'sSeriesname'", trim(__FILE__),__LINE__)
+     "internal error: must provide 'sTimeBasename'", trim(__FILE__),__LINE__)
 
    ! create a new series name if one is not provided
    if(present(sNewSeriesName)) then
@@ -3272,29 +3278,27 @@ TREE_CLIMBINQ_LOOQ:                 &
     pTimeBaseTS => this%getSeries(sTimeBaseName)
 
     ! perform sanity checks on date boundaries
-    call Assert(pTS%tStartDate <= pTimeBaseTS%tStartDate, &
-       "Series "//trim(sSeriesname)//" must start before the series (" &
-       //trim(sTimeBaseName)//") used to define the new time base", &
-       trim(__FILE__), __LINE__)
-    call Assert(pTS%tEndDate >= pTimeBaseTS%tEndDate, &
-       "Series "//trim(sSeriesname)//" must end after the series (" &
-       //trim(sTimeBaseName)//") used to define the new time base", &
-       trim(__FILE__), __LINE__)
+    if(pTS%tStartDate > pTimeBaseTS%tStartDate .or. &
+      pTS%tEndDate < pTimeBaseTS%tStartDate) &
+       call assert(lFALSE,"Series "//quote(sSeriesname) &
+       //" "//pTS%printDateRange()//"~does not completely cover the timespan " &
+       //" covered by series ~used as a timebase: "//quote(sTimebasename) &
+       //" "//pTimeBaseTS%printDateRange(), trim(__FILE__), __LINE__)
 
 !    allocate(pTempSeries, stat=iStat)
-!    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+!    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
 !      trim(__FILE__), __LINE__)
 !
 !    allocate(pTempSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
-!    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+!    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
 !      trim(__FILE__), __LINE__)
 
     allocate(pNewSeries, stat=iStat)
-    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(pNewSeries%tData(size(pTimeBaseTS%tData)), stat=iStat)
-    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     pNewSeries%sSeriesname = sNewName
@@ -3302,19 +3306,19 @@ TREE_CLIMBINQ_LOOQ:                 &
       //"interpolated to the datetimes found in series "//trim(pTimeBaseTS%sSeriesName)
 
     allocate(rX1(size(pTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(rY1(size(pTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(rX2(size(pTimeBaseTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     allocate(rY2(size(pTimeBaseTS%tData)),stat=iStat)
-    call Assert(iStat == 0, "Qroblem allocating memory for NEW_TIME_BASE calculation", &
+    call Assert(iStat == 0, "Problem allocating memory for NEW_TIME_BASE calculation", &
       trim(__FILE__), __LINE__)
 
     ! we're subtracting this (large) value so that we can get away with using
@@ -3350,7 +3354,7 @@ TREE_CLIMBINQ_LOOQ:                 &
 
 !------------------------------------------------------------------------------
 
-  function are_datetime_stamps_identical_fn(this, sSeriesname1, sSeriesname2)   result(lBool)
+  function are_datetime_stamps_identical_names_fn(this, sSeriesname1, sSeriesname2)   result(lBool)
 
     class(TIME_SERIES_COLLECTION) :: this
     character(len=*), intent(in) :: sSeriesName1
@@ -3359,37 +3363,118 @@ TREE_CLIMBINQ_LOOQ:                 &
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pTS1, pTS2
-    integer (kind=T_INT) :: iCount, iCount1, iCount2, i
-
-    lBool = lTRUE
 
     ! get pointers to the two series involved
     pTS1 => this%getSeries(sSeriesname1)
     pTS2 => this%getSeries(sSeriesName2)
+
+    lBool = this%datesEqual(pTS1, pTS2)
+
+    nullify(pTS1, pTS2)
+
+  end function are_datetime_stamps_identical_names_fn
+
+!------------------------------------------------------------------------------
+
+  function are_datetime_stamps_identical_fn(this, pTS1, pTS2)   result(lBool)
+
+    class(TIME_SERIES_COLLECTION) :: this
+    type (T_TIME_SERIES), pointer :: pTS1
+    type (T_TIME_SERIES), pointer :: pTS2
+    logical (kind=T_LOGICAL) :: lBool
+
+    ! [ LOCALS ]
+    integer (kind=T_INT) :: iCount, iCount1, iCount2, i
+
+    lBool = lTRUE
 
     iCount1 = size(pTS1%tData)
     iCount2 = size(pTS2%tData)
 
     if( iCount1 /= iCount2 ) then
        call warn(lFALSE, &
-         "Series "//quote(sSeriesname1)//" does not contain the same number of data elements " &
-         //"as "//quote(sSeriesName2) )
+         "Series "//quote(pTS1%sSeriesname)//" does not contain the same number ~of data elements " &
+         //"as "//quote(pTS2%sSeriesname))
        lBool = lFALSE
     endif
 
-    do i=1,iCount
-      if(.not. pTS1%tData(i)%tDT == pTS2%tData(i)%tDT) then
-        call warn(lFALSE, &
-          "Series "//quote(sSeriesname1)//" is not equal to " &
-          //quote(sSeriesName2)//"; datetime1: "//trim(pTS1%tData(i)%tDT%listdatetime() ) &
-          //"  datetime2: "//trim(pTS2%tData(i)%tDT%listdatetime() ) )
-        lBool = lFALSE
-        exit
-      endif
-    enddo
+    if(pTS1%iDataType /= pTS2%iDataType) then
+      call warn(lFALSE, &
+        "Series "//quote(pTS1%sSeriesname)//" is of type: "//lowercase(sSERIES_TYPE(pTS1%iDataType))// &
+        "~Series "//quote(pTS2%sSeriesname)//" is of type: "//lowercase(sSERIES_TYPE(pTS2%iDataType))// &
+        "~A series of one type cannot be interpolated to a timebase with a differing type")
+      lBool = lFALSE
+    endif
 
-    if(lBool) call echolog("  => Series "//quote(sSeriesname1) &
-         //" has datestamps identical to those in "//quote(sSeriesName2)//".")
+    select case(pTS1%iDataType)
+
+      case(iDAILY_SERIES)
+
+        do i=1,iCount
+          if(.not. pTS1%tData(i)%tDT == pTS2%tData(i)%tDT) then
+            call warn(lFALSE, &
+              "Series "//quote(pTS1%sSeriesname)//" is not equal to " &
+              //quote(pTS1%sSeriesname)//"; ~datetime1: "//trim(pTS1%tData(i)%tDT%listdatetime() ) &
+              //"  datetime2: "//trim(pTS2%tData(i)%tDT%listdatetime() ) )
+            lBool = lFALSE
+            exit
+          endif
+        enddo
+
+      case(iMONTHLY_SERIES)
+
+        do i=1,iCount
+          if( pTS1%tData(i)%tDT%iMonth /= pTS2%tData(i)%tDT%iMonth &
+             .or. pTS1%tData(i)%tDT%iYear /= pTS2%tData(i)%tDT%iYear) then
+            call warn(lFALSE, &
+              "Series "//quote(pTS1%sSeriesname)//" does not have month and year " &
+              //"~values in alignment with those of "&
+              //quote(pTS1%sSeriesname)//"; ~datetime1: "//trim(pTS1%tData(i)%tDT%listdatetime() ) &
+              //"  datetime2: "//trim(pTS2%tData(i)%tDT%listdatetime() ) )
+            lBool = lFALSE
+            exit
+          endif
+        enddo
+
+      case(iMONTHLY_SUMMARY)
+
+        do i=1,iCount
+          if( pTS1%tData(i)%tDT%iMonth /= pTS2%tData(i)%tDT%iMonth) then
+            call warn(lFALSE, &
+              "Series "//quote(pTS1%sSeriesname)//" does not have month " &
+              //"~values in alignment with those of "&
+              //quote(pTS1%sSeriesname)//"; ~datetime1: "//trim(pTS1%tData(i)%tDT%listdatetime() ) &
+              //"  datetime2: "//trim(pTS2%tData(i)%tDT%listdatetime() ) )
+            lBool = lFALSE
+            exit
+          endif
+        enddo
+
+      case(iANNUAL_SUMMARY)
+
+        do i=1,iCount
+          if( pTS1%tData(i)%tDT%iYear /= pTS2%tData(i)%tDT%iYear) then
+            call warn(lFALSE, &
+              "Series "//quote(pTS1%sSeriesname)//" does not have year " &
+              //"~values in alignment with those of "&
+              //quote(pTS1%sSeriesname)//"; ~datetime1: "//trim(pTS1%tData(i)%tDT%listdatetime() ) &
+              //"  datetime2: "//trim(pTS2%tData(i)%tDT%listdatetime() ) )
+            lBool = lFALSE
+            exit
+          endif
+        enddo
+
+      case default
+
+        call assert(lFALSE, "Logic error in case select structure", &
+          trim(__FILE__), __LINE__)
+
+    end select
+
+    if(lBool) then
+      call echolog("  => Series "//quote(pTS1%sSeriesname) &
+         //" has datestamps identical to those in "//quote(pTS2%sSeriesname)//".")
+    endif
 
     nullify(pTS1, pTS2)
 
@@ -3419,108 +3504,102 @@ TREE_CLIMBINQ_LOOQ:                 &
     lIsNewComparison = lTRUE
 
     do
+      ! get pointers to the two series involved
+      pObservedSeries => this%getSeries(sObservedSeries)
+      pModeledSeries => this%getSeries(sModeledSeries)
 
-      if(.not. this%datesEqual(sObservedSeries, sModeledSeries) ) then
+      if(.not. this%datesEqual(pObservedSeries, pModeledSeries) ) &
+        call assert(lFALSE, "Cannot create comparison between " &
+          //quote(sObservedSeries)//" and "//quote(sModeledSeries) &
+          //"~because the date and timestamps are unequal",trim(__FILE__), __LINE__)
 
-        call warn(lFALSE, "Cannot create comparison object: "//trim(sObservedSeries) &
-          //" and "//trim(sModeledSeries)//" do not have identical timebases.")
+      iCountObserved = size(pObservedSeries%tData)
+      iCountModeled = size(pModeledSeries%tData)
+
+      iNumDigits = len_trim(asChar(iCountObserved) )
+
+      if(len_trim(sObservedSeries) + 1 + iNumDigits > MAXNAMELENGTH) then
+        call warn(lFALSE, "Cannot create comparison object: the series name " &
+          //quote(sObservedSeries)//" is too long to allow for unique observation names to be created.")
         exit
+      endif
 
-      else  ! timebases for the two series are identical; proceed
+      if(.not. allocated(this%tTSComparison)) then
 
-        ! get pointers to the two series involved
-        pObservedSeries => this%getSeries(sObservedSeries)
-        pModeledSeries => this%getSeries(sModeledSeries)
+        allocate(this%tTSComparison(1),stat=iStat)
+        call Assert(iStat==0, "Unable to allocate memory for time series", &
+          TRIM(__FILE__), __LINE__)
 
-        iCountObserved = size(pObservedSeries%tData)
-        iCountModeled = size(pModeledSeries%tData)
-
-        iNumDigits = len_trim(asChar(iCountObserved) )
-
-        if(len_trim(sObservedSeries) + 1 + iNumDigits > MAXNAMELENGTH) then
-          call warn(lFALSE, "Cannot create comparison object: the series name " &
-            //quote(sObservedSeries)//" is too long to allow for unique observation names to be created.")
-          exit
-        endif
-
-        if(.not. allocated(this%tTSComparison)) then
-
-          allocate(this%tTSComparison(1),stat=iStat)
-          call Assert(iStat==0, "Unable to allocate memory for time series", &
+        this%tTSComparison(iCount + 1)%sObservedSeries = sObservedSeries
+        this%tTSComparison(iCount + 1)%sModeledSeries = sModeledSeries
+!        this%tTSComparison(1)%pObservedSeries => pObservedSeries
+!        this%tTSComparison(1)%pModeledSeries => pModeledSeries
+        this%tTSComparison(1)%sWeightsEquation = sEquationText
+        allocate(this%tTSComparison(1)%rWeightValue(iCountObserved) , stat=iStat)
+        call Assert(iStat==0, "Unable to allocate memory for time series", &
             TRIM(__FILE__), __LINE__)
+        this%tTSComparison(1)%rWeightValue = this%calculate(sEquationText, iCountObserved)
 
-          this%tTSComparison(iCount + 1)%sObservedSeries = sObservedSeries
-          this%tTSComparison(iCount + 1)%sModeledSeries = sModeledSeries
-!          this%tTSComparison(1)%pObservedSeries => pObservedSeries
-!          this%tTSComparison(1)%pModeledSeries => pModeledSeries
-          this%tTSComparison(1)%sWeightsEquation = sEquationText
-          allocate(this%tTSComparison(1)%rWeightValue(iCountObserved) , stat=iStat)
-          call Assert(iStat==0, "Unable to allocate memory for time series", &
-              TRIM(__FILE__), __LINE__)
-          this%tTSComparison(1)%rWeightValue = this%calculate(sEquationText, iCountObserved)
+      else   ! there are already TS comparison objects; add or replace
 
-        else   ! there are already TS comparison objects; add or replace
+        ! get the number of time series currently in time series container
+        iCount = size(this%tTSComparison)
 
-          ! get the number of time series currently in time series container
-          iCount = size(this%tTSComparison)
+        ! test to see if this comparison object already exists
+        do i=1,iCount
+          if( str_compare(this%tTSComparison(i)%sObservedSeries, sObservedSeries) &
+            .and. str_compare(this%tTSComparison(i)%sModeledSeries, sModeledSeries) ) then
+              lIsNewComparison = lFALSE
+              iRecordToReplace = i
+              exit
+          endif
+        enddo
 
-          ! test to see if this comparison object already exists
-          do i=1,iCount
-            if( str_compare(this%tTSComparison(i)%sObservedSeries, sObservedSeries) &
-              .and. str_compare(this%tTSComparison(i)%sModeledSeries, sModeledSeries) ) then
-                lIsNewComparison = lFALSE
-                iRecordToReplace = i
-                exit
-            endif
-          enddo
-
-          if( lIsNewComparison ) then
-            ! allocate memory for size of current TSComparison object
-            allocate(tTemtTSComparison(iCount),stat=iStat)
-            call Assert(iStat==0, "Unable to allocate temporary memory for time " &
-              //"series comparison object", &
-              TRIM(__FILE__), __LINE__)
-
-            ! make a copy of all previous TS objects
-            tTemtTSComparison = this%tTSComparison
-
-            ! deallocate TS comparison objects collection
-            deallocate(this%tTSComparison, stat=iStat)
-            call Assert(iStat==0, "Unable to deallocate memory for time " &
+        if( lIsNewComparison ) then
+          ! allocate memory for size of current TSComparison object
+          allocate(tTemtTSComparison(iCount),stat=iStat)
+          call Assert(iStat==0, "Unable to allocate temporary memory for time " &
             //"series comparison object", &
             TRIM(__FILE__), __LINE__)
 
-            ! allocate TS comparison objects collection to include room for new object
-            allocate(this%tTSComparison(iCount + 1), stat=iStat)
-            call Assert(iStat==0, "Unable to allocate memory for time series comparison object", &
-              TRIM(__FILE__), __LINE__)
+          ! make a copy of all previous TS objects
+          tTemtTSComparison = this%tTSComparison
 
-            this%tTSComparison(1:iCount) = tTemtTSComparison
+          ! deallocate TS comparison objects collection
+          deallocate(this%tTSComparison, stat=iStat)
+          call Assert(iStat==0, "Unable to deallocate memory for time " &
+          //"series comparison object", &
+          TRIM(__FILE__), __LINE__)
 
-!            this%tTSComparison(iCount + 1)%pObservedSeries => pObservedSeries
-!            this%tTSComparison(iCount + 1)%pModeledSeries => pModeledSeries
-            this%tTSComparison(iCount + 1)%sObservedSeries = sObservedSeries
-            this%tTSComparison(iCount + 1)%sModeledSeries = sModeledSeries
-            this%tTSComparison(iCount + 1)%sWeightsEquation = sEquationText
-            allocate(this%tTSComparison(iCount + 1)%rWeightValue(iCountObserved) , stat=iStat)
-            call Assert(iStat==0, "Unable to allocate memory for time series", &
-              TRIM(__FILE__), __LINE__)
+          ! allocate TS comparison objects collection to include room for new object
+          allocate(this%tTSComparison(iCount + 1), stat=iStat)
+          call Assert(iStat==0, "Unable to allocate memory for time series comparison object", &
+            TRIM(__FILE__), __LINE__)
 
-            this%tTSComparison(iCount + 1)%rWeightValue = this%calculate(sEquationText, iCountObserved)
+          this%tTSComparison(1:iCount) = tTemtTSComparison
 
-          else
+!          this%tTSComparison(iCount + 1)%pObservedSeries => pObservedSeries
+!          this%tTSComparison(iCount + 1)%pModeledSeries => pModeledSeries
+          this%tTSComparison(iCount + 1)%sObservedSeries = sObservedSeries
+          this%tTSComparison(iCount + 1)%sModeledSeries = sModeledSeries
+          this%tTSComparison(iCount + 1)%sWeightsEquation = sEquationText
+          allocate(this%tTSComparison(iCount + 1)%rWeightValue(iCountObserved) , stat=iStat)
+          call Assert(iStat==0, "Unable to allocate memory for time series", &
+            TRIM(__FILE__), __LINE__)
 
-            ! if object already exists, just replace the equation text
-            this%tTSComparison(iRecordToReplace)%sWeightsEquation = sEquationText
-            this%tTSComparison(iRecordToReplace)%rWeightValue = this%calculate(sEquationText, iCountObserved)
+          this%tTSComparison(iCount + 1)%rWeightValue = this%calculate(sEquationText, iCountObserved)
 
-          endif  ! lIsNewComparison
+        else
 
-        endif  ! tTScomparison .not. allocated
+          ! if object already exists, just replace the equation text
+          this%tTSComparison(iRecordToReplace)%sWeightsEquation = sEquationText
+          this%tTSComparison(iRecordToReplace)%rWeightValue = this%calculate(sEquationText, iCountObserved)
 
-        exit
+        endif  ! lIsNewComparison
 
-      endif  ! .not. dates are equal
+      endif  ! tTScomparison .not. allocated
+
+      exit
 
     enddo
 
@@ -3708,7 +3787,7 @@ function calc_values_from_equation_fn(this,sFunctionText, iNumRecords) result(rO
       call TSCOL%insert( pNewSeries=pTS )
       lInclude(i) = lTRUE
       if(iNumSeries>1) then
-        lConsistentTimebase = this%datesEqual(sPreviousSeriesName, sVarTxt(i) )
+        lConsistentTimebase = this%datesEqualByName(sPreviousSeriesName, sVarTxt(i) )
         if(.not. lConsistentTimebase) exit
       endif
       sPreviousSeriesName = sVarTxt(i)

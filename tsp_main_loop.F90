@@ -66,27 +66,6 @@ module tsp_main_loop
 
 contains
 
-  subroutine toggleassert()
-
-   lAssertAlwaysFatal = .not. lAssertAlwaysFatal
-
-   if(lAssertAlwaysFatal) then
-     write(unit=LU_STD_OUT, fmt="(a)") &
-        "TSPROC errors will now result in a FATAL fortran error."
-   else
-     write(unit=LU_STD_OUT, fmt="(a)") &
-        "TSPROC errors will now result in only a warning."
-     write(unit=LU_STD_OUT,fmt="(/,a)") &
-        "You should probably exit from Python ASAP and restart your work"
-     write(unit=LU_STD_OUT,fmt="(a,/)") &
-        "if you receive a serious TSPROC error message."
-
-   endif
-
-  end subroutine toggleassert
-
-!------------------------------------------------------------------------------
-
   subroutine opencontrolfile(sFilename, sRecFile)
 
     !f2py intent(in) :: sFilename
@@ -979,10 +958,13 @@ end subroutine listtablenames
     character (len=MAXARGLENGTH), dimension(:), pointer :: pArgs
     character (len=MAXARGLENGTH) :: sTempSeriesname
 
+    print *, quote(__FILE__)//": ", __LINE__
+
     if(present(sSeriesname) .and. len_trim(sSeriesName) > 0 ) then
 
       pTempSeries =>TS%getSeries(sSeriesName)
       ! don't pass along the block object; use defaults
+      print *, quote(__FILE__)//": ", __LINE__
       pNewSeries => pTempSeries%findHydroEvents()
 
     elseif(str_compare(pBlock%sBlockName, "HYDRO_EVENTS")) then
@@ -1432,7 +1414,7 @@ subroutine series_compare(sObservedSeries_, sModeledSeries_, sNewTableName_, &
       //"because they have unequal numbers of elements", trim(__FILE__), __LINE__)
 
     ! check to see that the timestamps are identical between series
-    call assert( TS%datesEqual(sObservedSeries, sModeledSeries), &
+    call assert( TS%datesEqual(pObservedSeries, pModeledSeries), &
       "Series "//quote(sObservedSeries)//" and "//quote(sModeledSeries) &
       //" have unequal timesteps in block beginning at " &
       //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
@@ -1446,7 +1428,7 @@ subroutine series_compare(sObservedSeries_, sModeledSeries_, sNewTableName_, &
       //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
 
       ! check to see that the timestamps are identical between series
-      call assert( TS%datesEqual(sObservedSeries, sBaseSeries), &
+      call assert( TS%datesEqual(pObservedSeries, pBaseSeries), &
         "Base series "//quote(sBaseSeries)//" does not have timesteps " &
         //" equal to those in observed and modeled series in block beginning at " &
         //trim(asChar(pBlock%iStartingLineNumber) ), trim(__FILE__), __LINE__)
@@ -1896,11 +1878,11 @@ end subroutine usgs_hysep
 
     elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_SSF")) then
 
-      call get_mul_series_ssf(pBlock, TS)
+      call get_mul_series_ssf_fast(pBlock, TS)
 
     elseif(str_compare(pBlock%sBlockname,"GET_SERIES_SSF")) then
 
-      call get_mul_series_ssf(pBlock, TS)
+      call get_mul_series_ssf_fast(pBlock, TS)
 
     elseif(str_compare(pBlock%sBlockname,"GET_MUL_SERIES_SSF_FAST")) then
 
@@ -2043,7 +2025,7 @@ subroutine datestampsequal(sSeriesname1, sSeriesname2, lbool)
   character (len=*), intent(in) :: sSeriesname2
   logical (kind = T_LOGICAL ) :: lBool
 
-  lBool = TS%datesEqual(sSeriesname1, sSeriesname2)
+  lBool = TS%datesEqualByName(sSeriesname1, sSeriesname2)
 
 end subroutine datestampsequal
 
@@ -2538,11 +2520,13 @@ subroutine period_statistics()
 
     ! [ LOCALS ]
     type (T_TIME_SERIES), pointer :: pBaseTS
-    type (T_TIME_SERIES), pointer, dimension(:) :: pStatSeries
     type (T_TIME_SERIES), pointer :: pTempStatSeries
     integer (kind=T_INT) :: i
     character (len=MAXARGLENGTH), dimension(:), pointer :: pSERIES_NAME
     character (len=MAXARGLENGTH) :: sTempSeriesname
+    type (T_MINI_COLLECTION), dimension(:), pointer ::  pTSCOL
+
+    pBaseTS => null(); pTempStatSeries => null(); pTSCOL => null()
 
     if(str_compare(pBlock%sBlockName, "PERIOD_STATISTICS")) then
 
@@ -2552,7 +2536,7 @@ subroutine period_statistics()
         //trim(asChar(pBlock%iStartingLineNumber)), trim(__FILE__),__LINE__)
       sTempSeriesname = pSERIES_NAME(1)
       pBaseTS => TS%getSeries( sTempSeriesname )
-      pStatSeries => pBaseTS%calcPeriodStatistics( pBlock)
+      pTSCOL => pBaseTS%calcPeriodStatistics( pBlock)
 
     else
 
@@ -2561,16 +2545,19 @@ subroutine period_statistics()
 
     endif
 
-    do i=1,size(pStatSeries)
+    do i=1,size(pTSCOL)
 
-      pTempStatSeries => pStatSeries(i)
+      pTempStatSeries => pTSCOL(i)%pTS
       call TS%insert(pNewSeries=pTempStatSeries)
+      pTSCOL(i)%pTS => null()
 
     enddo
 
-    deallocate(pSERIES_NAME)
+    if(associated(pSERIES_NAME) ) deallocate(pSERIES_NAME)
     nullify(pBaseTS)
     nullify(pTempStatSeries)
+    if(associated(pTSCOL) ) deallocate(pTSCOL)
+!    nullify(pTSCOL)
 
 end subroutine period_statistics
 

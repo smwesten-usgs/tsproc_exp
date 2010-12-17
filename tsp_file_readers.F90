@@ -579,10 +579,13 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
   character (len=256) sRecord, sItem
   character (len=256) sDateTxt, sTimeTxt
 
+  ! initialization
   iCount = 0; i=0 ; iSiteNum = 0
+  pFILE => null(); pSite => null(); pNEW_SERIES_NAME => null()
   sOldSiteID = ""; sSiteID = ""
   lFirstTimeThrough = lTRUE
 
+  ! obtain user-supplied date and time
   call processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2)
 
   ! obtain user-entered values from TSPROC block
@@ -611,10 +614,10 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
 !        call TS%addSeries(pTS)
         call TS%insert(pNewSeries=pTS)
         nullify(pTS)
-        allocate(pTS, stat=iStat)
-        call assert(iStat==0, "Memory allocation error", &
-          trim(__FILE__),__LINE__)
-        call pTS%newTemp()
+!        allocate(pTS, stat=iStat)
+!        call assert(iStat==0, "Memory allocation error", &
+!          trim(__FILE__),__LINE__)
+!        call pTS%newTemp()
       endif
       exit
     elseif(sRecord(1:1) .eq. "#") then
@@ -636,6 +639,7 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
 !        call TS%addSeries(pTS)
         call TS%insert(pNewSeries=pTS)
         nullify(pTS)
+        ! nullify old series; create room for the new series
         allocate(pTS, stat=iStat)
         call assert(iStat==0, "Memory allocation error", &
           trim(__FILE__),__LINE__)

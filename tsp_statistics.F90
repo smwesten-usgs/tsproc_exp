@@ -731,14 +731,10 @@ end subroutine write_base_stats
     iNumQuantiles = size(rQuantiles)
     iNumRecords = size(rData)
 
-    ! for this algorithm to work, data mush be sorted in ascending order
+    ! for this algorithm to work, data must be sorted in ascending order
     CALL quick_sort(rDatacp, iOriginalOrder)
 
-    rValues = rZERO
-
-!    allocate(rValues(iNumQuantiles), stat=iStat)
-!    call Assert(iStat == 0, "Problem allocating memory for quantiles", &
-!        trim(__FILE__), __LINE__)
+     rValues = rZERO
 
     if(iNumRecords > 0) then
 

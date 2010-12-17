@@ -7,18 +7,44 @@ module tsp_time_series_manager
   use tsp_control_file_ops
   implicit none
 
-  integer (kind=T_INT), parameter, public :: iDAILY_DATA = 0
-  integer (kind=T_INT), parameter, public :: iSUMMARY_BY_MONTH = 1
-  integer (kind=T_INT), parameter, public :: iMONTHLY_DATA = 2
-  integer (kind=T_INT), parameter, public :: iANNUAL_DATA = 3
+  ! define some useful named constants
+  integer (kind=T_INT), parameter, public :: iDAILY_SERIES = 0
+  integer (kind=T_INT), parameter, public :: iMONTHLY_SERIES = 1
+  integer (kind=T_INT), parameter, public :: iMONTHLY_SUMMARY = 2
+  integer (kind=T_INT), parameter, public :: iANNUAL_SUMMARY = 3
 
+  integer (kind=T_INT), parameter, private :: iSUM = 0
+  integer (kind=T_INT), parameter, private :: iMINIMUM = 1
+  integer (kind=T_INT), parameter, private :: iMAXIMUM = 2
+  integer (kind=T_INT), parameter, private :: iMEAN = 3
+  integer (kind=T_INT), parameter, private :: iRANGE = 4
+  integer (kind=T_INT), parameter, private :: iSTD_DEV = 5
+
+  integer (kind=T_INT), parameter, private :: iCALENDAR = 0
+  integer (kind=T_INT), parameter, private :: iWATER_YEAR_HIGH = 1
+  integer (kind=T_INT), parameter, private :: iWATER_YEAR_LOW = 2
+
+  character (len=15), dimension(0:3), parameter, public :: sSERIES_TYPE = &
+    ["Daily series   ", "Monthly series ", "Monthly summary", "Annual summary "]
+
+  character (len=9), dimension(0:5), parameter, private :: sSTATISTIC = &
+    ["Sum      ","Minimum  ","Maximum  ","Mean     ","Range    ","Std. dev."]
+  character (len=17), dimension(0:2), parameter, private :: sYEAR_TYPE = &
+    ["(calendar year)  ", "(water year high)","(water year low) "]
+
+  integer (kind=T_INT), parameter, private :: iSTART = 0
+  integer (kind=T_INT), parameter, private :: iCENTER = 1
+  integer (kind=T_INT), parameter, private :: iEND = 2
+
+  ! define a derived type to hold series data
   type, public :: T_TIME_SERIES_DATA
-    integer (kind=T_INT) :: iWaterYear     = 0
+!    integer (kind=T_INT) :: iWaterYear     = 0
     type (T_DATETIME) :: tDT
     real (kind=T_SGL)    :: rValue         = -HUGE(rZERO)
     character (len=10)   :: sDataFlag      = ""
     logical (kind=T_LOGICAL) :: lSelect = lTRUE   ! use this flag to select subset of active range
     logical (kind=T_LOGICAL) :: lInclude = lTRUE  ! use this flag to preselect by date range
+    logical (kind=T_LOGICAL) :: lValid = lTRUE    ! use this flag indicate faulty or questionable values
 
   contains
 !    procedure :: calcWaterYear => calc_water_year_sub
@@ -26,6 +52,7 @@ module tsp_time_series_manager
 
   end type T_TIME_SERIES_DATA
 
+  ! define a derived type to hold metadata concerning a time series
   type, public :: T_TIME_SERIES
     type (T_TIME_SERIES), pointer :: pNext => null()
     type (T_TIME_SERIES), pointer :: pPrevious => null()
@@ -37,30 +64,40 @@ module tsp_time_series_manager
     type (T_DATETIME) :: tEndDate
     type (T_DATETIME) :: tSelectionStartDate
     type (T_DATETIME) :: tSelectionEndDate
-    integer (kind=T_INT) :: iDataType = iDAILY_DATA
+    integer (kind=T_INT) :: iDataType = iDAILY_SERIES
     integer (kind=T_INT) :: iCurrentRecord = 0
     integer (kind=T_INT) :: iListOutputPosition = -999
     type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
+    procedure (stat_func_interface), pointer :: stat_func_ptr
+    procedure (select_func_interface), pointer :: select_func_ptr
 
   contains
 
     procedure :: includeByDate => include_by_date_fn
+    procedure :: selectByDate => select_by_date_fn
     procedure :: selectByValue => select_by_value_fn
     procedure :: selectByMonth => select_by_month_fn
     procedure :: selectByMonthAndYear => select_by_month_and_year_fn
     procedure :: selectByYear => select_by_year_fn
-    procedure :: selectByWaterYear => select_by_water_year_fn
+    procedure :: selectByWaterYearHigh => select_by_water_year_high_fn
+    procedure :: selectByWaterYearLow => select_by_water_year_high_fn
 
     procedure :: statsCreateObject => ts_create_stats_object_fn
+    procedure :: statByPeriod => ts_calc_stat_by_period_fn
     procedure :: statsByMonth => ts_calc_stats_by_month_fn
     procedure :: statsByYear => ts_calc_stats_by_year_fn
     procedure :: statsByMonthAndYear => ts_calc_stats_by_month_and_year_fn
 
-    procedure :: reset => select_none_sub
+    procedure :: selectNone => select_none_sub
     procedure :: selectAll => select_all_sub
     procedure :: list => list_output_sub
     procedure :: writeInstructions => list_output_instructions_sub
     procedure :: calcPeriodStatistics => calculate_period_statistics_fn
+
+    procedure :: mean => ts_mean_fn
+    procedure :: min => ts_min_fn
+    procedure :: max => ts_max_fn
+    procedure :: sum => ts_sum_fn
 
     procedure :: new_time_series_fm_txt_sub
     procedure :: new_time_series_fm_NWIS_sub
@@ -83,29 +120,55 @@ module tsp_time_series_manager
     procedure :: findDateMinAndMax => find_min_and_max_date_sub
     procedure :: findDataGaps => find_data_gaps_fn
     procedure :: findHydroEvents => find_hydro_events_fn
+    procedure :: printDateRange => print_date_range_fn
     procedure :: integrate => integrate_fn
 
 !    procedure :: reducetimespan => reduce_time_span_sub
 
   end type T_TIME_SERIES
 
+
+  type T_MINI_COLLECTION
+    type (T_TIME_SERIES), pointer :: pTS
+  end type T_MINI_COLLECTION
+
+  type (T_MINI_COLLECTION), dimension(:), pointer ::  pTSCOL
+
+  abstract interface
+
+    function stat_func_interface(ts)  result(rValue)
+      import
+      class (T_TIME_SERIES) :: ts
+      real (kind=T_SGL) :: rValue
+    end function stat_func_interface
+
+    function select_func_interface(ts, iYear, lKeep_)  result(iCount)
+      import
+      class (T_TIME_SERIES) :: ts
+      integer (kind=T_INT), intent(in) :: iYear
+      logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+      integer (kind=T_INT) :: iCount
+    end function select_func_interface
+
+  end interface
+
 contains
 
 !------------------------------------------------------------------------------
 
-  subroutine new_empty_temp_series_sub(this, iInitSize)
+  subroutine new_empty_temp_series_sub(this, iInitSize_)
 
     class(T_TIME_SERIES) :: this
-    integer (kind=T_INT), intent(in), optional :: iInitSize
+    integer (kind=T_INT), intent(in), optional :: iInitSize_
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: iStat
     integer (kind=T_INT) :: iSize
 
-    if(present(iInitSize) ) then
-      iSize = iInitSize
+    if(present(iInitSize_) ) then
+      iSize = iInitSize_
     else
-      iSize = 1825  ! room for 5 years of daily data
+      iSize = 365 * 15
     endif
 
     allocate(this%tData(iSize), stat=iStat)
@@ -353,7 +416,7 @@ contains
     call Assert(iStat==0, "Unable to allocate memory to create new time series", &
        TRIM(__FILE__), __LINE__)
 
-    this%tData%iWaterYear = tTS%tData%iWaterYear
+!    this%tData%iWaterYear = tTS%tData%iWaterYear
     this%tData%tDT = tTS%tData%tDT
     this%tData%rValue = tTS%tData%rValue
     this%tData%sDataFlag = tTS%tData%sDataFlag
@@ -451,6 +514,19 @@ contains
    deallocate(rX1, rY1, rX2, rY2)
 
   end function integrate_fn
+
+!------------------------------------------------------------------------------
+
+  function print_date_range_fn(this)    result(sDateRange)
+
+    class(T_TIME_SERIES) :: this
+    character(len=26) :: sDateRange
+
+    write(sDateRange,fmt="('(',i2.2,'/',i2.2,'/',i4.4,' to ',i2.2,'/',i2.2,'/',i4.4,')')") &
+      this%tStartDate%iMonth, this%tStartDate%iDay, this%tStartDate%iYear, &
+      this%tEndDate%iMonth, this%tEndDate%iDay, this%tEndDate%iYear
+
+  end function print_date_range_fn
 
 !------------------------------------------------------------------------------
 
@@ -625,6 +701,72 @@ contains
 
 !------------------------------------------------------------------------------
 
+  function select_by_date_fn(this, GE, LE, lKeep_)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    type (T_DATETIME), intent(in), optional :: GE
+    type (T_DATETIME),intent(in),optional   :: LE
+    logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    type (T_DATETIME) :: tGE_DT
+    type (T_DATETIME) :: tLE_DT
+    integer (kind=T_INT) :: i
+    logical (kind=T_LOGICAL) :: lKeep
+
+    ! if no arguments supplied, all time series elements will be selected
+    if(present(GE)) then
+      tGE_DT = GE
+    else
+      tGE_DT = this%tStartDate
+    endif
+
+    if(present(LE)) then
+      tLE_DT = LE
+    else
+      tLE_DT = this%tEndDate
+    endif
+
+    if(present(lKeep_)) then
+      lKeep = lKeep_
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+
+      do i=1,size(this%tData)
+
+        if(this%tData(i)%tDT >= tGE_DT .and. this%tData(i)%tDT <= tLE_DT &
+          .and. this%tData(i)%lInclude) &
+            this%tData(i)%lSelect = lTRUE
+
+      enddo
+
+    else
+
+      do i=1,size(this%tData)
+
+        if(this%tData(i)%tDT >= tGE_DT .and. this%tData(i)%tDT <= tLE_DT &
+          .and. this%tData(i)%lInclude) then
+
+          this%tData(i)%lSelect = lTRUE
+
+        else
+          this%tData(i)%lSelect = lFALSE
+        endif
+
+      enddo
+
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_date_fn
+
+!------------------------------------------------------------------------------
+
   function select_by_month_fn(this, iMonth, lKeep_)  result(iCount)
 
     class(T_TIME_SERIES) :: this
@@ -715,7 +857,7 @@ contains
   function select_by_year_fn(this, iYear, lKeep_)  result(iCount)
 
     class(T_TIME_SERIES) :: this
-    integer (kind=T_INT) :: iYear
+    integer (kind=T_INT), intent(in) :: iYear
     logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
     integer (kind=T_INT) :: iCount
 
@@ -754,10 +896,10 @@ contains
 
 !------------------------------------------------------------------------------
 
-  function select_by_water_year_fn(this, iWaterYear, lKeep_)  result(iCount)
+  function select_by_water_year_high_fn(this, iYear, lKeep_)  result(iCount)
 
     class(T_TIME_SERIES) :: this
-    integer (kind=T_INT), intent(in) :: iWaterYear
+    integer (kind=T_INT), intent(in) :: iYear
     logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
     integer (kind=T_INT) :: iCount
 
@@ -776,13 +918,13 @@ contains
 
     if(lKeep) then
 
-      where (this%tData%iWaterYear == iWaterYear  .and. this%tData%lInclude )
+      where (this%tData%tDT%iWaterYearHigh == iYear  .and. this%tData%lInclude )
         this%tData%lSelect = lTRUE
       endwhere
 
     else
 
-      where (this%tData%iWaterYear == iWaterYear  .and. this%tData%lInclude )
+      where (this%tData%tDT%iWaterYearHigh == iYear  .and. this%tData%lInclude )
         this%tData%lSelect = lTRUE
       elsewhere
         this%tData%lSelect = lFALSE
@@ -792,7 +934,49 @@ contains
 
     iCount = count(this%tData%lSelect)
 
-  end function select_by_water_year_fn
+  end function select_by_water_year_high_fn
+
+!------------------------------------------------------------------------------
+
+  function select_by_water_year_low_fn(this, iYear, lKeep_)  result(iCount)
+
+    class(T_TIME_SERIES) :: this
+    integer (kind=T_INT), intent(in) :: iYear
+    logical (kind=T_LOGICAL), intent(in), optional :: lKeep_
+    integer (kind=T_INT) :: iCount
+
+    ! [ LOCALS ]
+    logical (kind=T_LOGICAL) :: lKeep
+    integer (kind=T_INT) :: i
+
+    ! if this is TRUE, the select does not alter the status for points
+    ! outside the current selection range (i.e. if lKeep is false, ALL
+    ! points in the series are scanned and assigned TRUE/FALSE status.
+    if(present(lKeep_)) then
+      lKeep = lKeep_
+    else
+      lKeep = lFALSE
+    endif
+
+    if(lKeep) then
+
+      where (this%tData%tDT%iWaterYearLow == iYear  .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      endwhere
+
+    else
+
+      where (this%tData%tDT%iWaterYearLow == iYear  .and. this%tData%lInclude )
+        this%tData%lSelect = lTRUE
+      elsewhere
+        this%tData%lSelect = lFALSE
+      endwhere
+
+    endif
+
+    iCount = count(this%tData%lSelect)
+
+  end function select_by_water_year_low_fn
 
 !------------------------------------------------------------------------------
 
@@ -938,9 +1122,7 @@ contains
     ! [ LOCALS ]
     integer (kind=T_INT) :: i
     integer (kind=T_INT) :: LU
-    integer (kind=T_INT) :: iYear
 !    character(len=20) :: sDateFmt
-    character (len=256) :: sFormatString
 
     if(present(iLU)) then
       LU = iLU
@@ -956,50 +1138,44 @@ contains
 
     write(LU,fmt="(/,' TIME_SERIES ',a,' ---->')") quote(this%sSeriesName)
 
-    if(this%iDataType == iDAILY_DATA) then
-
-      sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,a20,3x,g16.8)"
+    if(this%iDataType == iDAILY_SERIES) then
 
       do i=1,size(this%tData)
 
-         write(LU,fmt=trim(sFormatString)) trim(this%sSeriesName), &
-            this%tData(i)%tDT%listdatetime(), this%tData(i)%rValue
+           write(LU,fmt="(1x,a18,t22,a14,t40,g16.8)") &
+             trim(this%sSeriesName), &
+             this%tData(i)%tDT%listdatetime(), this%tData(i)%rValue
 
       enddo
 
-    elseif (this%iDataType == iSUMMARY_BY_MONTH) then
-
-      sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,a15,3x,g16.8)"
+    elseif (this%iDataType == iMONTHLY_SERIES) then
 
       do i=1,size(this%tData)
 
-         write(LU,fmt=trim(sFormatString)) trim(this%sSeriesName), &
-            trim(MONTH(this%tData(i)%tDT%iMonth)%sName), this%tData(i)%rValue
+           write(LU,fmt="(1x,a18,t22,a8,t35,g16.8)") &
+              this%sSeriesName, &
+              trim(MONTH(this%tData(i)%tDT%iMonth)%sName), this%tData(i)%rValue
 
       enddo
 
-    elseif (this%iDataType == iMONTHLY_DATA) then
-
-      sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,a15,3x,g16.8)"
+    elseif (this%iDataType == iMONTHLY_SUMMARY) then
 
       do i=1,size(this%tData)
 
-         iYear = this%tData(i)%tDT%iYear
-         write(LU,fmt=trim(sFormatString)) trim(this%sSeriesName), &
-            trim(MONTH(this%tData(i)%tDT%iMonth)%sName)//" " &
-            //trim(asChar(iYear)), this%tData(i)%rValue
+           write(LU,fmt="(1x,a18,t22,a8,1x,i4,t38,g16.8)") &
+              this%sSeriesName, &
+              trim(MONTH(this%tData(i)%tDT%iMonth)%sName), &
+              this%tData(i)%tDT%iYear, this%tData(i)%rValue
 
       enddo
 
-    elseif (this%iDataType == iANNUAL_DATA) then
-
-      sFormatString = "(1x,a"//trim(asChar(MAXNAMELENGTH) )//",3x,a10,3x,g16.8)"
+    elseif (this%iDataType == iANNUAL_SUMMARY) then
 
       do i=1,size(this%tData)
 
-         iYear = this%tData(i)%tDT%iYear
-         write(LU,fmt=trim(sFormatString)) trim(this%sSeriesName), &
-              trim(asChar(iYear)), this%tData(i)%rValue
+           write(LU,fmt="(1x,a18,t25,i4,t35,g16.8)") &
+             this%sSeriesName, &
+             this%tData(i)%tDT%iYear, this%tData(i)%rValue
 
       enddo
 
@@ -1072,6 +1248,8 @@ contains
          pWINDOW, pMIN_PEAK, pRISE_LAG, pFALL_LAG
       real (kind=T_SGL) :: rWINDOW, rMIN_PEAK, rRISE_LAG, rFALL_LAG
 
+      pWINDOW => null(); pMIN_PEAK => null(); pRISE_LAG => null()
+      pFALL_LAG => null(); pNEW_SERIES_NAME => null()
 
       tStartDate = this%tStartDate
       tEndDate = this%tEndDate
@@ -1095,6 +1273,7 @@ contains
           "Value supplied for WINDOW must be greater than zero in block starting at line " &
             //trim(asChar(pBlock%iStartingLineNumber) ), &
             trim(__FILE__), __LINE__)
+
         rWINDOW = pWINDOW(1)
 
         pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
@@ -1102,6 +1281,7 @@ contains
           "No value was supplied for NEW_SERIES_NAME in block starting at line " &
             //trim(asChar(pBlock%iStartingLineNumber) ), &
             trim(__FILE__), __LINE__)
+
         sNewSeriesName = trim(pNEW_SERIES_NAME(1) )
 
         pMIN_PEAK => pBlock%getReal("MIN_PEAK")
@@ -1113,6 +1293,7 @@ contains
           "Value supplied for MIN_PEAK must be greater than zero in block starting at line " &
             //trim(asChar(pBlock%iStartingLineNumber) ), &
             trim(__FILE__), __LINE__)
+
         rMIN_PEAK = pMIN_PEAK(1)
 
         pRISE_LAG => pBlock%getReal("RISE_LAG")
@@ -1124,6 +1305,7 @@ contains
           "Value supplied for RISE_LAG must be greater than zero in block starting at line " &
             //trim(asChar(pBlock%iStartingLineNumber) ), &
             trim(__FILE__), __LINE__)
+
         rRISE_LAG = pRISE_LAG(1)
 
         pFALL_LAG => pBlock%getReal("FALL_LAG")
@@ -1135,6 +1317,7 @@ contains
           "Value supplied for FALL_LAG must be greater than zero in block starting at line " &
             //trim(asChar(pBlock%iStartingLineNumber) ), &
             trim(__FILE__), __LINE__)
+
         rFALL_LAG = pFALL_LAG(1)
 
         deallocate(pWINDOW, pMIN_PEAK, pRISE_LAG, pFALL_LAG, pNEW_SERIES_NAME)
@@ -1166,10 +1349,10 @@ contains
 
         ! if this element is not selected (i.e. within selected date range)
         ! jump to next iteration of loop
-        if( .not. this%tData(i)%lSelect ) cycle
+        if( .not. this%tData(i)%lInclude ) cycle
 
-        ! OK, now reset lSelect in preparation for peak identification
-        this%tData(i)%lSelect = lFALSE
+!        ! OK, now reset lSelect in preparation for peak identification
+!        this%tData(i)%lSelect = lFALSE
 
         ! cannot evaluate slopes at either end of the time series
         if(i == 1) cycle
@@ -1220,7 +1403,7 @@ contains
 
       ! clear the selection flags in preparation for identification of the
       ! values preceding and following the peak values
-      call this%reset()
+      call this%selectNone()
 
       do i=2, size(this%tData) - 1
         ! if this element is not selected, jump to next iteration of loop
@@ -1233,10 +1416,12 @@ contains
         ! for each identified date, we select the date range associated with
         ! the rise lag and fall lag, marking the elements for inclusion
         ! in the final output series
-        iCount = this%includeByDate(GE = tCurrentDate%decrement(rRISE_LAG), &
-                                   LE = tCurrentDate%increment(rFALL_LAG))
+        iCount = this%selectByDate(GE = tCurrentDate%decrement(rRISE_LAG), &
+                                   LE = tCurrentDate%increment(rFALL_LAG), &
+                                   lKeep_ = lTRUE)
      enddo
 
+     if(associated( pTempSeries) ) nullify(pTempSeries)
      allocate(pTempSeries, stat=iStat )
      call assert(iStat == 0, "Problem allocating memory for series in while " &
        //"processing HYDRO_PEAKS block", trim(__FILE__), __LINE__)
@@ -1257,11 +1442,11 @@ contains
 
 !------------------------------------------------------------------------------
 
-  function calculate_period_statistics_fn(this, pBlock)    result(pTempSeries)
+  function calculate_period_statistics_fn(this, pBlock)  result(pTSCOL)
 
       class(T_TIME_SERIES) :: this
       type (T_BLOCK), pointer :: pBlock
-      type (T_TIME_SERIES), dimension(:), pointer :: pTempSeries
+      type (T_MINI_COLLECTION), dimension(:), pointer ::  pTSCOL
 
       ! [ LOCALS ]
       integer (kind=T_INT) :: iSize, iStatSize
@@ -1269,29 +1454,25 @@ contains
       integer (kind=T_INT) :: iYear, iMonth, iFirstYear
       integer (kind=T_INT) :: iStat
       integer (kind=T_INT) :: iCount
+      integer (kind=T_INT) :: iStatistic
+      integer (kind=T_INT) :: iPeriod
+      integer (kind=T_INT) :: iTimeAbscissa
       character (len=256) :: sBuf
+      character (len=12) :: sSuffix
       type (T_DATETIME) :: tStartDate, tEndDate
       character (len=MAXNAMELENGTH) :: sSeriesName
       logical (kind=T_LOGICAL) :: lAddSuffix
-      type (T_STATS_COLLECTION), pointer, save :: pStats
+!      type (T_STATS_COLLECTION), pointer, save :: pStats
+      type (T_TIME_SERIES), dimension(:), pointer :: pTempSeries
+      type (T_TIME_SERIES), pointer :: pTS
+      type (T_TIME_SERIES_DATA), pointer :: pTempData
 
       character (len=MAXARGLENGTH), dimension(:), pointer :: &
-         pNEW_SERIES_NAME, pSTATISTIC, pPERIOD
+         pNEW_SERIES_NAME, pSTATISTIC, pPERIOD, pTIME_ABSCISSA
 
-      ! attempt to reuse pStats object if this call involves the same
-      ! series name as the last call did...
-      if(.not. associated(pStats) ) then
-        allocate(pStats, stat=iStat)
-        call assert(iStat==0,"Problem allocating memory for pStats object", &
-          trim(__FILE__), __LINE__)
-      elseif(.not. str_compare(this%sSeriesName, pStats%sSeriesName) ) then
-        call destroy_stats_object(pStats)
-        allocate(pStats, stat=iStat)
-        call assert(iStat==0,"Problem allocating memory for pStats object", &
-          trim(__FILE__), __LINE__)
-        pStats%sSeriesName = this%sSeriesName
-      endif
-
+      pNEW_SERIES_NAME => null(); pSTATISTIC => null(); pPERIOD => null()
+      pTIME_ABSCISSA => null(); pTS => null(); pTempData => null()
+      pTSCOL => null()
 
       call processUserSuppliedDateTime(pBlock, tStartDate, tEndDate)
 
@@ -1304,350 +1485,132 @@ contains
 
       ! restrict data to specified date range, if desired
       iCount =  this%includeByDate(tStartDate, tEndDate)
-      call Assert(iCount > 0, "Problem calculating PERIOD_STATISTICs: no time series data within " &
-        //"specified date range", trim(__FILE__), __LINE__)
+      if(iCount == 0) &
+        call Assert(lFALSE, "Problem calculating PERIOD_STATISTICs: ~ no time" &
+          //" series data within " &
+          //"specified date range ("//tStartDate%prettydate()//" to " &
+          //tEndDate%prettydate()//")", trim(__FILE__), __LINE__)
 
+      ! find out what statistics have been requested; if none, assume "mean"
       pSTATISTIC => pBlock%getString("STATISTIC")
       if(str_compare(pSTATISTIC(1), "NA")) pSTATISTIC(1) = "mean"
 
+      ! find out what time period been requested; if none, assume "year"
       pPERIOD => pBlock%getString("PERIOD")
       if(str_compare(pPERIOD(1), "NA")) pPERIOD(1) = "year"
 
+      pTIME_ABSCISSA => pBlock%getString("TIME_ABSCISSA")
+      if(str_compare(pTIME_ABSCISSA(1), "NA")) pTIME_ABSCISSA(1) = "center"
+
       ! if only one period is given, assume it applies to all statistics
-      if(size(pPeriod) == 1 .and. size(pStatistic) > 1) then
+      if(size(pPERIOD) == 1 .and. size(pSTATISTIC) > 1) then
         sBuf = pPERIOD(1)
         deallocate(pPERIOD)
         allocate(pPERIOD(size(pSTATISTIC)) )
         pPERIOD = trim(sBUF)
       endif
 
+      ! if only one time_abscissa is given, assume it applies to all statistics
+      if(size(pTIME_ABSCISSA) == 1 .and. size(pSTATISTIC) > 1) then
+        sBuf = pTIME_ABSCISSA(1)
+        deallocate(pTIME_ABSCISSA)
+        allocate(pTIME_ABSCISSA(size(pSTATISTIC)) )
+        pTIME_ABSCISSA = trim(sBUF)
+      endif
+
+      ! assume that period and statistic arguments are in order; there
+      ! must be an equal number of both arguments
       call Assert(size(pPERIOD) == size(pSTATISTIC), &
         "An averaging period must be specified for each statistic", trim(__FILE__), __LINE__)
 
+      ! how many statistics are we calculating?
       iSize = size(pSTATISTIC)
 
-      allocate(pTempSeries(iSize), stat=iStat )
+!      allocate(pTempSeries(iSize), stat=iStat)
+      allocate(pTSCOL(iSize), stat=iStat)
+      call assert(iStat == 0, "Memory allocation error", trim(__FILE__), __LINE__)
 
       ! determine what the new series name(s) should be....
-      pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
-      if( str_compare(pNEW_SERIES_NAME(1), "NA") ) then
-        pTempSeries%sSeriesName = trim(sSeriesName)//"_"
-        lAddSuffix = lTRUE
-      else
-        do i=1,iSize
-          pTempSeries(i)%sSeriesName = pNEW_SERIES_NAME(i)
-        enddo
-      endif
+       pNEW_SERIES_NAME => pBlock%getString("NEW_SERIES_NAME")
+!       if( str_compare(pNEW_SERIES_NAME(1), "NA") ) then
+!         pTempSeries%sSeriesName = trim(sSeriesName)//"_"
+!         lAddSuffix = lTRUE
+!       else
+!         do i=1,iSize
+!           pTSCOL(i)%pTS%sSeriesName = pNEW_SERIES_NAME(i)
+!         enddo
+!       endif
 
       do i=1,iSize
 
-        ! **** calculate mean monthly statistics ****
+        ! determine the time period for calculation
         if(str_compare(pPERIOD(i),"month_one") ) then
-
-          iStatSize = 12
-
-          allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
-
-          pTempSeries(i)%iDataType = iSUMMARY_BY_MONTH
-          pTempSeries(i)%tStartDate = tStartDate
-          pTempSeries(i)%tEndDate = tEndDate
-          do j=1,iStatSize
-            pTempSeries(i)%tData(j)%tDT%iMonth = j
-          enddo
-
-          if(.not. associated(pStats%pByMonth) ) then
-!            pStats%pByMonth => calc_stats_by_month(tData%rValue, &
-!                                       tData%tDT%iMonth, tData%tDT%iJulianDay)
-            pStats%pByMonth => this%statsByMonth()
-
-          endif
-
-          if(str_compare(pSTATISTIC(i), "sum") ) then
-
-            pTempSeries(i)%tData%rValue = pStats%pByMonth%rSum
-            pTempSeries(i)%sDescription = &
-              "Monthly sum for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"msm"
-
-          elseif(str_compare(pSTATISTIC(i), "mean") ) then
-
-            pTempSeries(i)%tData%rValue = pStats%pByMonth%rMean
-
-            pTempSeries(i)%sDescription = &
-              "Monthly mean for time series "//quote(sSeriesName)
-
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"mav"
-
-          elseif(str_compare(pSTATISTIC(i), "std_dev") ) then
-
-            pTempSeries(i)%tData%rValue = pStats%pByMonth%rStddev
-            pTempSeries(i)%sDescription = &
-              "Monthly standard deviation for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"msd"
-
-          elseif(str_compare(pSTATISTIC(i), "maximum") ) then
-
-            pTempSeries(i)%tData%rValue = pStats%pByMonth%rMax
-            pTempSeries(i)%sDescription = &
-              "Monthly maximum for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"mmx"
-
-          elseif(str_compare(pSTATISTIC(i), "minimum") ) then
-
-            pTempSeries(i)%tData%rValue = pStats%pByMonth%rMin
-            pTempSeries(i)%sDescription = &
-              "Monthly sum minimum time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"mmn"
-
-          elseif(str_compare(pSTATISTIC(i), "range") ) then
-
-            pTempSeries(i)%tData%rValue = pStats%pByMonth%rRange
-            pTempSeries(i)%sDescription = &
-              "Monthly range for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"mrg"
-
-          else
-
-            call Assert(lFALSE, "Unknown STATISTIC "//quote(pSTATISTIC(i) ), &
-               trim(__FILE__),__LINE__)
-
-          endif
-
-        ! **** calculate monthly mean statistics ****
+          iPeriod = iMONTHLY_SUMMARY
+          sSuffix = "m"
         elseif(str_compare(pPERIOD(i),"month_many") ) then
-
-          if(.not. associated(pStats%pByYearAndMonth) ) then
-!            pStats%pByYearAndMonth => calc_stats_by_year_and_month(tData%rValue, &
-!                               tData%tDT%iMonth, tData%tDT%iYear, tData%tDT%iJulianDay)
-!            pStats%pByYearAndMonth => calc_stats_by_year_and_month(tData%rValue, &
-!                               tData%tDT%iMonth, tData%tDT%iYear, tData%tDT%iJulianDay)
-
-            pStats%pByYearAndMonth => this%statsByMonthAndYear()
-
-          endif
-
-          iStatSize = count(pStats%pByYearAndMonth%lValid)
-
-          allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
-          pTempSeries(i)%iDataType = iMONTHLY_DATA
-          pTempSeries(i)%tStartDate = tStartDate
-          pTempSeries(i)%tEndDate = tEndDate
-
-
-          j=0
-          do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-            do iMonth = 1,12
-              if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                j=j+1
-                pTempSeries(i)%tData(j)%tDT%iMonth = iMonth
-                pTempSeries(i)%tData(j)%tDT%iYear = iYear
-              endif
-            enddo
-          enddo
-
-          if(str_compare(pSTATISTIC(i), "sum") ) then
-
-            j=0
-            do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-              do iMonth = 1,12
-                if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                  j=j+1
-                  pTempSeries(i)%tData(j)%rValue = pStats%pByYearAndMonth(iYear, iMonth)%rSum
-                endif
-              enddo
-            enddo
-            pTempSeries(i)%sDescription = &
-              "Sum of monthly values for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"mssm"
-
-          elseif(str_compare(pSTATISTIC(i), "mean") ) then
-
-            j=0
-            do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-              do iMonth = 1,12
-                if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                  j=j+1
-                  pTempSeries(i)%tData(j)%rValue = pStats%pByYearAndMonth(iYear, iMonth)%rMean
-                endif
-              enddo
-            enddo
-            pTempSeries(i)%sDescription = &
-              "Mean monthly values for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"msav"
-
-          elseif(str_compare(pSTATISTIC(i), "std_dev") ) then
-
-            j=0
-            do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-              do iMonth = 1,12
-                if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                  j=j+1
-                  pTempSeries(i)%tData(j)%rValue = pStats%pByYearAndMonth(iYear, iMonth)%rStddev
-                endif
-              enddo
-            enddo
-            pTempSeries(i)%sDescription = &
-              "Standard deviation monthly values for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"mssd"
-
-          elseif(str_compare(pSTATISTIC(i), "maximum") ) then
-
-            j=0
-            do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-              do iMonth = 1,12
-                if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                  j=j+1
-                  pTempSeries(i)%tData(j)%rValue = pStats%pByYearAndMonth(iYear, iMonth)%rMax
-                endif
-              enddo
-            enddo
-            pTempSeries(i)%sDescription = &
-              "Maximum monthly values for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"msmx"
-
-          elseif(str_compare(pSTATISTIC(i), "minimum") ) then
-
-            j=0
-            do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-              do iMonth = 1,12
-                if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                  j=j+1
-                  pTempSeries(i)%tData(j)%rValue = pStats%pByYearAndMonth(iYear, iMonth)%rMin
-                endif
-              enddo
-            enddo
-            pTempSeries(i)%sDescription = &
-              "Minimum monthly values for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"msmn"
-
-          elseif(str_compare(pSTATISTIC(i), "range") ) then
-
-            j=0
-            do iYear = lbound(pStats%pByYearAndMonth,1), ubound(pStats%pByYearAndMonth,1)
-              do iMonth = 1,12
-                if(pStats%pByYearAndMonth(iYear, iMonth)%lValid) then
-                  j=j+1
-                  pTempSeries(i)%tData(j)%rValue = pStats%pByYearAndMonth(iYear, iMonth)%rRange
-                endif
-              enddo
-            enddo
-            pTempSeries(i)%sDescription = &
-              "Range of monthly values for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"msrg"
-
-          else
-
-            call Assert(lFALSE, "Unknown STATISTIC "//quote(pSTATISTIC(i) ), &
-               trim(__FILE__),__LINE__)
-
-          endif
-
-        ! **** calculate annual statistics ****
+          iPeriod = iMONTHLY_SERIES
+          sSuffix = "ms"
         elseif(str_compare(pPERIOD(i),"year") ) then
+          iPeriod = iANNUAL_SUMMARY
+          sSuffix = "a"
+        else
+          call assert(lFALSE, "Unknown PERIOD: "//quote(pPERIOD(i)), &
+              trim(__FILE__), __LINE__)
+        endif
 
-          if(.not. associated(pStats%pByYear) ) then
-!            pStats%pByYear => calc_stats_by_year(tData%rValue, &
-!                                   tData%tDT%iYear, tData%tDT%iJulianDay)
-            pStats%pByYear => this%statsByYear()
+        ! determine which statistic should be calculated
+        if(str_compare(pSTATISTIC(i), "sum") ) then
+          iStatistic = iSUM
+          sSuffix = trim(sSuffix)//"_sm"
+        elseif(str_compare(pSTATISTIC(i), "mean") ) then
+          iStatistic = iMEAN
+          sSuffix = trim(sSuffix)//"_mn"
+        elseif(str_compare(pSTATISTIC(i), "minimum") ) then
+          iStatistic = iMINIMUM
+          sSuffix = trim(sSuffix)//"_mi"
+        elseif(str_compare(pSTATISTIC(i), "maximum") ) then
+          iStatistic = iMAXIMUM
+          sSuffix = trim(sSuffix)//"_ma"
+        elseif(str_compare(pSTATISTIC(i), "range") ) then
+          iStatistic = iRANGE
+          sSuffix = trim(sSuffix)//"_ra"
+        elseif(str_compare(pSTATISTIC(i), "std_dev") ) then
+          iStatistic = iSTD_DEV
+          sSuffix = trim(sSuffix)//"_sd"
+        else
+          call assert(lFALSE, "Unknown STATISTIC: "//quote(pSTATISTIC(i)), &
+              trim(__FILE__), __LINE__)
+        endif
 
-          endif
+        if(str_compare(pTIME_ABSCISSA(i), "start") ) then
+          iTimeAbscissa = iSTART
+        elseif(str_compare(pTIME_ABSCISSA(i), "center") &
+           .or. str_compare(pTIME_ABSCISSA(i), "centre") ) then
+          iTimeAbscissa = iCENTER
+        elseif(str_compare(pTIME_ABSCISSA(i), "end") ) then
+          iTimeAbscissa = iEND
+        else
+          call assert(lFALSE, "Unknown TIME_ABSCISSA value: "//quote(pTIME_ABSCISSA(i)), &
+              trim(__FILE__), __LINE__)
+        endif
 
-          iStatSize = count(pStats%pByYear%lValid)
+!        allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
+!
 
-          allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
-          pTempSeries(i)%iDataType = iANNUAL_DATA
-          pTempSeries(i)%tStartDate = tStartDate
-          pTempSeries(i)%tEndDate = tEndDate
+        pTSCOL(i)%pTS => this%statByPeriod(iPeriod, iStatistic, iTimeAbscissa)
+        pTSCOL(i)%pTS%iDataType = iPeriod
 
-          iFirstYear =  lbound(pStats%pByYear,1)
-          k = 0
-          do j = 1, size(pStats%pByYear)
-            if(pStats%pByYear(j - 1 + iFirstYear)%lValid) then
-              k = k + 1
-              pTempSeries(i)%tData(k)%tDT%iYear = (j-1) + iFirstYear
-            endif
-          enddo
-
-          if(str_compare(pSTATISTIC(i), "sum") ) then
-
-            pTempSeries(i)%tData%rValue = &
-              pack(pStats%pByYear%rSum, pStats%pByYear%lValid)
-            pTempSeries(i)%sDescription = &
-              "Annual sum for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"asm"
-
-          elseif(str_compare(pSTATISTIC(i), "mean") ) then
-
-            pTempSeries(i)%tData%rValue = &
-              pack(pStats%pByYear%rMean, pStats%pByYear%lValid)
-            pTempSeries(i)%sDescription = &
-              "Annual mean for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"aav"
-
-          elseif(str_compare(pSTATISTIC(i), "std_dev") ) then
-
-            pTempSeries(i)%tData%rValue = &
-              pack(pStats%pByYear%rStddev, pStats%pByYear%lValid)
-            pTempSeries(i)%sDescription = &
-              "Annual standard deviation for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"asd"
-
-          elseif(str_compare(pSTATISTIC(i), "maximum") ) then
-
-            pTempSeries(i)%tData%rValue = &
-              pack(pStats%pByYear%rMax, pStats%pByYear%lValid)
-            pTempSeries(i)%sDescription = &
-              "Annual maximum for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"amx"
-
-          elseif(str_compare(pSTATISTIC(i), "minimum") ) then
-
-            pTempSeries(i)%tData%rValue = &
-              pack(pStats%pByYear%rMin, pStats%pByYear%lValid)
-            pTempSeries(i)%sDescription = &
-              "Annual minimum for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"amn"
-
-          elseif(str_compare(pSTATISTIC(i), "range") ) then
-
-            pTempSeries(i)%tData%rValue = &
-              pack(pStats%pByYear%rRange, pStats%pByYear%lValid)
-            pTempSeries(i)%sDescription = &
-              "Annual range for time series "//quote(sSeriesName)
-            if(lAddSuffix) pTempSeries(i)%sSeriesName = &
-               trim(pTempSeries(i)%sSeriesName)//"arg"
-
-          else
-
-            call Assert(lFALSE, "Unknown STATISTIC "//quote(pSTATISTIC(i) ), &
-               trim(__FILE__),__LINE__)
-
-          endif
-
+        if( str_compare(pNEW_SERIES_NAME(1), "NA") ) then
+          pTSCOL(i)%pTS%sSeriesName = trim(sSeriesName)//"_"//trim(sSuffix)
+        else
+          pTSCOL(i)%pTS%sSeriesName = trim(adjustl(pNEW_SERIES_NAME(i) ) )
         endif
 
       enddo
 
-      if (associated(pNEW_SERIES_NAME) ) deallocate(pNEW_SERIES_NAME)
       if (associated(pSTATISTIC) ) deallocate(pSTATISTIC)
       if (associated(pPERIOD) ) deallocate(pPERIOD)
+      if (associated(pTIME_ABSCISSA) ) deallocate(pTIME_ABSCISSA)
 
   end function calculate_period_statistics_fn
 
@@ -1773,6 +1736,294 @@ end function ts_calc_stats_by_month_and_year_fn
 
 !------------------------------------------------------------------------------
 
+function ts_mean_fn(this)  result(rMean)
+
+   class(T_TIME_SERIES) :: this
+   real (kind=T_SGL) :: rMean
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iCount
+
+   rMean = 0_T_SGL
+
+   iCount = count( this%tData%lSelect )
+   if(iCount > 0) rMean = sum( this%tData%rValue, this%tData%lSelect ) / iCount
+
+end function ts_mean_fn
+
+!------------------------------------------------------------------------------
+
+function ts_variance_fn(this)  result(rVariance)
+
+   class(T_TIME_SERIES) :: this
+   real (kind=T_SGL) :: rVariance
+
+   ! [ LOCALS ]
+
+
+
+end function ts_variance_fn
+
+!------------------------------------------------------------------------------
+
+function ts_range_fn(this)  result(rRange)
+
+   class(T_TIME_SERIES) :: this
+   real (kind=T_SGL) :: rRange
+
+   rRange = this%max() - this%min()
+
+end function ts_range_fn
+
+!------------------------------------------------------------------------------
+
+function ts_sum_fn(this)  result(rSum)
+
+   class(T_TIME_SERIES) :: this
+   real (kind=T_SGL) :: rSum
+
+   rSum = sum( this%tData%rValue, this%tData%lSelect )
+
+end function ts_sum_fn
+
+!------------------------------------------------------------------------------
+
+function ts_min_fn(this)  result(rMin)
+
+   class(T_TIME_SERIES) :: this
+   real (kind=T_SGL) :: rMin
+
+   rMin = minval( this%tData%rValue, this%tData%lSelect )
+
+end function ts_min_fn
+
+!------------------------------------------------------------------------------
+
+function ts_max_fn(this)  result(rMax)
+
+   class(T_TIME_SERIES) :: this
+   real (kind=T_SGL) :: rMax
+
+   rMax = maxval( this%tData%rValue, this%tData%lSelect )
+
+end function ts_max_fn
+
+!------------------------------------------------------------------------------
+
+function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
+     iYearType_) result(pTS)
+
+   class(T_TIME_SERIES) :: this
+   integer (kind=T_INT), intent(in) :: iPeriod
+   integer (kind=T_INT), intent(in) :: iStatistic
+   integer (kind=T_INT), intent(in) :: iTimeAbscissa
+   integer (kind=T_INT), intent(in), optional :: iYearType_
+   type (T_TIME_SERIES), pointer :: pTS
+   type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
+
+   ! [ LOCALS ]
+   integer (kind=T_INT) :: iFirstYear, iLastYear, iCenterYear
+   integer (kind=T_INT) :: iMonth, iYear, n
+   integer (kind=T_INT) :: iStat
+   integer (kind=T_INT) :: iCount
+   integer (kind=T_INT) :: iNumValid
+   integer (kind=T_INT) :: iYearType
+
+   if(present(iYearType_) ) then
+     iYearType = iYearType_
+   else
+     iYearType = iCALENDAR
+   endif
+
+   pTS => null()
+
+   ! define the mathematical function to be applied
+   select case (iStatistic)
+
+     case( iSUM )
+       this%stat_func_ptr => ts_sum_fn
+
+     case( iMEAN )
+       this%stat_func_ptr => ts_mean_fn
+
+     case( iMAXIMUM )
+       this%stat_func_ptr => ts_max_fn
+
+     case( iMINIMUM )
+       this%stat_func_ptr => ts_min_fn
+
+     case( iRANGE )
+       this%stat_func_ptr => ts_range_fn
+
+     case default
+
+       call assert(lFALSE, "Logic error in case select structure", trim(__FILE__), &
+          __LINE__)
+
+   end select
+
+   allocate(pTS, stat=iStat)
+   call assert(iStat == 0, "Memory allocation error", trim(__FILE__), __LINE__)
+
+   iFirstYear = minval(this%tData%tDT%iYear, this%tData%lInclude)
+   iLastYear = maxval(this%tData%tDT%iYear, this%tData%lInclude)
+   iCenterYear = (iFirstYear + iLastYear ) / 2
+
+   ! now apply the function to the appropriate time period
+   select case(iPeriod)
+
+     case(iMONTHLY_SUMMARY)
+       allocate(tData(12), stat=iStat)
+       call assert(iStat == 0,"Memory allocation error", trim(__FILE__), __LINE__)
+
+       tData%tDT%iMonth = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+       pTS%sDescription = trim(sSTATISTIC(iStatistic)) &
+           //" monthly values derived from series "//quote(this%sSeriesName) &
+           //"; ("//trim(asChar(iFirstYear))//" to "//trim(asChar(iLastYear))//")"
+
+       select case (iTimeAbscissa)
+         case(iSTART)
+           tData%tDT%iDay = 1
+           tData%tDT%iYear = 2
+         case(iCENTER)
+           tData%tDT%iDay = 15
+           tData%tDT%iYear = 2
+         case(iEND)
+           tData%tDT%iDay = MONTH%iNumDays
+           tData%tDT%iYear = 2
+       end select
+
+       do iMonth = 1,12
+
+         iCount = this%selectByMonth(iMonth)
+
+         call tData(iMonth)%tDT%calcJulianDay()
+
+         if(iCount > 25) then
+           tData(iMonth)%rValue = this%stat_func_ptr()
+         else
+           tData(iMonth)%rValue = -HUGE(rZERO)
+           tData(iMonth)%lValid = lFALSE
+         endif
+
+       enddo
+
+     case(iMONTHLY_SERIES)      ! month_many
+
+       allocate(tData(12 * (iLastYear - iFirstYear + 1) ), stat=iStat)
+       call assert(iStat == 0,"Memory allocation error", trim(__FILE__), __LINE__)
+       pTS%sDescription = "Monthly "//trim(lowercase(sSTATISTIC(iStatistic))) &
+           //" values derived from series "//quote(this%sSeriesName) &
+           //"; ("//trim(asChar(iFirstYear))//" to "//trim(asChar(iLastYear))//")"
+
+       select case (iTimeAbscissa)
+         case(iSTART)
+           tData%tDT%iDay = 1
+         case(iCENTER)
+           tData%tDT%iDay = 15
+!         case(iEND)
+!           pTS%tData%tDT%iDay = MONTH%iNumDays
+       end select
+
+       n = 0
+       do iYear = iFirstYear, iLastYear
+
+         do iMonth = 1,12
+
+           n = n + 1
+           iCount = this%selectByMonthAndYear(iMonth, iYear)
+
+           tData(n)%tDT%iYear = iYear
+           tData(n)%tDT%iMonth = iMonth
+           if(iTimeAbscissa == iEND) tData(n)%tDT%iDay = MONTH(iMonth)%iNumDays
+           call tData(n)%tDT%calcJulianDay()
+
+           if(iCount > 25) then
+             tData(n)%rValue = this%stat_func_ptr()
+           else
+             tData(n)%rValue = -HUGE(rZERO)
+             tData(n)%lValid = lFALSE
+           endif
+
+         enddo
+
+       enddo
+
+     case(iANNUAL_SUMMARY)
+
+       allocate(tData(iLastYear - iFirstYear + 1), stat=iStat)
+       call assert(iStat == 0,"Memory allocation error", trim(__FILE__), __LINE__)
+
+       ! define the year selection function to be applied
+       select case (iYearType)
+
+         case( iCALENDAR )
+           this%select_func_ptr => select_by_year_fn
+
+         case( iWATER_YEAR_HIGH )
+           this%select_func_ptr => select_by_water_year_high_fn
+
+         case( iWATER_YEAR_LOW )
+           this%select_func_ptr => select_by_water_year_low_fn
+         case default
+           call assert(lFALSE,"Logic error in case construct", &
+             trim(__FILE__), __LINE__)
+
+       end select
+
+       pTS%sDescription = "Annual "//trim(sYEAR_TYPE(iYearType))//" " &
+           //trim(lowercase(sSTATISTIC(iStatistic))) &
+           //" values derived from series "//quote(this%sSeriesName) &
+           //"; ("//trim(asChar(iFirstYear))//" to "//trim(asChar(iLastYear))//")"
+
+       select case (iTimeAbscissa)
+         case(iSTART)
+           tData%tDT%iDay = 1
+           tData%tDT%iMonth = 1
+         case(iCENTER)
+           tData%tDT%iDay = 1
+           tData%tDT%iMonth = 6
+         case(iEND)
+           tData%tDT%iDay = 31
+           tData%tDT%iMonth = 12
+       end select
+
+       n = 0
+       do iYear = iFirstYear, iLastYear
+
+         n = n + 1
+         iCount = this%select_func_ptr(iYear)
+         tData(n)%tDT%iYear = iYear
+         call tData(n)%tDT%calcJulianDay()
+         if(iCount > 350) then
+           tData(n)%rValue = this%stat_func_ptr()
+         else
+           tData(n)%rValue = -HUGE(rZERO)
+           tData(n)%lValid = lFALSE
+         endif
+
+       enddo
+
+     case default
+
+          call assert(lFALSE, "Logic error in case select structure", trim(__FILE__), &
+            __LINE__)
+
+   end select
+
+   pTS%iDataType = iPeriod
+
+   ! if we have time periods that contain invalid statistics, delete them
+   ! from the final time series
+   iNumValid = count(tData%lValid)
+   allocate(pTS%tData(iNumValid) )
+   pTS%tData = pack(pTS%tData,pTS%tData%lValid)
+   call pTS%findDateMinAndMax()
+
+end function ts_calc_stat_by_period_fn
+
+!------------------------------------------------------------------------------
+
 function ts_calc_stats_by_year_fn(this)  result(pStatsByYear)
 
    class(T_TIME_SERIES) :: this
@@ -1806,6 +2057,114 @@ function ts_calc_stats_by_year_fn(this)  result(pStatsByYear)
    enddo
 
 end function ts_calc_stats_by_year_fn
+
+!------------------------------------------------------------------------------
+
+function ts_calc_base_stats(this)   result(pBaseStats)
+
+   class(T_TIME_SERIES) :: this
+   type (T_STATS), pointer :: pBaseStats
+
+   ! [ LOCALS ]
+   real (kind=T_SGL), dimension(count(this%tData%lSelect)) :: rData
+   integer (kind=T_INT), dimension(count(this%tData%lSelect)) :: iOriginalOrder
+   integer (kind=T_INT), dimension(count(this%tData%lSelect)) :: iJulianDay
+   integer (kind=T_INT) :: i,j,k
+   integer (kind=T_INT), dimension(1) :: iLocMin, iLocMax
+   real (kind=T_SGL) :: rMean
+   integer (kind=T_INT) :: iMaxPeriodIndex
+   integer (kind=T_INT) :: iStat, iCount
+
+   real (kind=T_DBL) :: rNewMean, rOldMean
+   real (kind=T_DBL) :: rNewVariance, rOldVariance
+
+   rNewMean = 0_T_DBL; rOldMean = 0_T_DBL
+   rNewVariance = 0_T_DBL; rOldVariance = 0_T_DBL
+
+   ! transfer data to temp data structure
+   ! calculate mean and variance in the same pass
+   ! (credit: Donald Knuth's Art of Computer Programming, Vol 2, page 232, 3rd edition)
+   j=0
+   do i=1,iCount
+     if(this%tData(i)%lSelect) then
+       j = j + 1
+       rData(j) = this%tData(i)%rValue
+       iJulianDay(j) = this%tData(i)%tDT%iJulianDay
+       rNewMean = rOldMean + ( rData(j) - rOldMean ) / j
+       rNewVariance = rOldVariance + ( rData(j) - rOldMean ) * ( rData(j) - rNewMean )
+       rOldMean = rNewMean
+       rOldVariance = rNewVariance
+     endif
+   enddo
+
+   iCount = size(rData)
+
+   ! allocate memory for stats object
+   allocate(pBaseStats, stat=iStat)
+   call assert(iStat == 0, "Memory allocation error", trim(__FILE__), __LINE__)
+
+   pBaseStats%iCount = iCount
+
+   pBaseStats%rSum = sum(rData)
+
+!   tBaseStats%rMedian = median(rData)
+
+   if(iCount > 0) pBaseStats%rMean = rNewMean
+
+   pBaseStats%rVariance = rNewVariance
+
+   pBaseStats%rStddev = sqrt(rNewVariance)
+   if(pBaseStats%rMean /= 0.) pBaseStats%rCV = pBaseStats%rStddev / pBaseStats%rMean
+
+!   do i=1,iNUM_QUANTILES
+!     tBaseStats%rQuantile(i) = quantile(rSTD_PROBABILITIES(i), rSortedData)
+!     tBaseStats%rExceedance(iNUM_QUANTILES - i + 1) = tBaseStats%rQuantile(i)
+!   end do
+
+   pBaseStats%rQuantile = quantiles(rSTD_PROBABILITIES, rData)
+   pBaseStats%rExceedance = 1.0 - pBaseStats%rQuantile
+   pBaseStats%rMedian = pBaseStats%rQuantile(P50)
+
+   pBaseStats%rMin = MINVAL(rData)
+   pBaseStats%rMax = MAXVAL(rData)
+   pBaseStats%rRange = pBaseStats%rMax - pBaseStats%rMin
+   iLocMin = MINLOC(rData)
+   iLocMax = MAXLOC(rData)
+
+   pBaseStats%iDayOfYearMin = day_of_year(iJulianDay(iLocMin(1)))
+   pBaseStats%iDayOfYearMax = day_of_year(iJulianDay(iLocMax(1)))
+
+   pBaseStats%rPeriodMax = 1.e-20
+   pBaseStats%rPeriodMin = 1.e+20
+
+   if(size(rData) >= 365) then
+     iMaxPeriodIndex = D90
+   else if(size(rData) >= 30) then
+     iMaxPeriodIndex = D30
+   else
+     iMaxPeriodIndex = D1
+   endif
+
+   ! iterate over the indices: 1-day, 3-day, 7-day, 30-day, 90-day
+   do i=1,iMaxPeriodIndex
+     ! now iterate over all of rData, calculating the mean value for
+     ! a given averaging period; track the extrema
+     do j=1,size(rData) - AVERAGING_PERIOD(i)%iDaysInPeriod + 1
+       k = j + AVERAGING_PERIOD(i)%iDaysInPeriod - 1
+       rMean = SUM(rData(j:k)) / AVERAGING_PERIOD(i)%iDaysInPeriod
+       if (rMean > pBaseStats%rPeriodMax(i)) pBaseStats%rPeriodMax(i) = rMean
+       if (rMean < pBaseStats%rPeriodMin(i)) pBaseStats%rPeriodMin(i) = rMean
+     end do
+   end do
+
+   pBaseStats%lValid = lTRUE
+
+   return
+
+end function ts_calc_base_stats
+
+
+
 
 !------------------------------------------------------------------------------
 

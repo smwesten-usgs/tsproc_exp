@@ -71,11 +71,16 @@ subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2, sDateFo
   sDATE_1 = "01/01/0100"; sTIME_1 = "00:00:00"
   sDATE_2 = "12/31/3000"; sTIME_2 = "00:00:00"
   sTIME_FORMAT = sDEFAULT_TIME_FORMAT
+  pDATE_1 => null(); pTIME_1 => null()
+  pDATE_2 => null(); pTIME_2 => null()
+  pDATE_FORMAT => null(); pTIME_FORMAT => null()
 
   if(present(sDateFormat) ) then
     sDATE_FORMAT = sDateFormat
+
   else
     sDATE_FORMAT = sDEFAULT_DATE_FORMAT
+
   endif
 
   ! obtain user-supplied values, if any
@@ -203,13 +208,12 @@ function read_block_fn(this)      result(pBlock)
     this%iLineNumber = this%iLineNumber + 1
 
     if( len_trim(sLine) == 0 ) cycle         ! ignore completely blank lines
+    if( index(sLine(1:8),"#") /= 0 ) cycle   ! ignore comment characters in first 8 columns
 
     call Chomp(sLine, sKey)
     call Chomp(sLine, sArg)
 
-    if( str_compare(sKey(1:1),"#")) cycle    ! ignore comments
-
-    call echolog(trim(sKey)//" "//trim(sArg))
+    if(lVERBOSE)  call echolog(trim(sKey)//" "//trim(sArg))
 
     if( str_compare(sKey,"START")) then
       lInBlock = lTRUE
@@ -218,8 +222,10 @@ function read_block_fn(this)      result(pBlock)
     elseif ( str_compare(sKey,"END" )) then
       lInBlock = lFALSE
       call Assert(str_compare(TRIM(sArg),pBlock%sBlockname), &
-        "Block names associated with START and END do not agree: " &
-        //"block beginning at line number "// &
+        "Block names associated with START and END do not agree: ~" &
+        //"  block starts with: "//quote(pBlock%sBlockname)//"~" &
+        //"  block ends with:   "//quote(sArg) &
+        //"~block beginning at line number "// &
           asChar(this%iLineNumber), trim(__FILE__),__LINE__)
       exit
     elseif ( lInBlock ) then
@@ -277,10 +283,12 @@ function read_block_fn(this)      result(pBlock)
   if(lOKtoAllocate) then
     call echolog('Processing '//TRIM(pBlock%sBlockName)//' block beginning at line number '// &
         asChar(pBlock%iStartingLineNumber),"(a)")
-    do j=1,i
-      call writelog('  <'//trim(asChar(iLineNum(j)))//'> '//trim(sKeyword(j)) &
-          //' '//trim(sArg1(j)) )
-    enddo
+    if(lVERBOSE) then
+      do j=1,i
+        call writelog('  <'//trim(asChar(iLineNum(j)))//'> '//trim(sKeyword(j)) &
+            //' '//trim(sArg1(j)) )
+      enddo
+    endif
   else
     call echolog('IGNORING '//TRIM(pBlock%sBlockName)//' block beginning at line number '// &
         trim(asChar(pBlock%iStartingLineNumber))//"; block inactive in context "//trim(this%sActiveContext))
@@ -504,7 +512,9 @@ function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
 !  character(len=MAXARGLENGTH), dimension(:), allocatable :: sArgs
 
   ! [ LOCALS ]
-  integer (kind=T_INT) :: i, n, iCount, iStat
+  integer (kind=T_INT) :: i, j, n, iCount, iStat
+
+  pArgs => null()
 
   n = size(this%sKeyword)
 
@@ -526,13 +536,20 @@ function get_character_values_by_keyword_fn(this, sKeyword)    result(pArgs)
   if(iCount == 0) then
     allocate(pArgs(1), stat=iStat)
     call Assert(iStat==0, "Problem with allocation",trim(__FILE__),__LINE__)
-    pArgs = ""
+    pArgs = "           "
     pArgs = "NA"
   else
     allocate(pArgs(iCount), stat=iStat)
     call Assert(iStat==0, "Problem with allocation",trim(__FILE__),__LINE__)
-    pArgs = ""
-    pArgs = transfer(pack(this%sArg1,this%lSelect),pArgs)
+    pArgs = "        "
+!    pArgs = transfer(pack(this%sArg1,this%lSelect),pArgs)
+    j = 0
+    do i=1,n
+      if(this%lSelect(i)) then
+        j = j + 1
+        pArgs(j) = this%sArg1(i)
+      endif
+    enddo
   endif
 
 end function get_character_values_by_keyword_fn
