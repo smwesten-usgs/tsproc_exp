@@ -657,6 +657,7 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
         lMatch = lFALSE
         do j=1,size(pSITE)
           if(str_compare(pSITE(j),sSiteID)) then
+
             lMatch = lTRUE
             pTS%sDescription = "Series "//quote(pNEW_SERIES_NAME(j))//" from SSF file " &
              //quote(pFILE(1))//", site "//trim(pSITE(j))
@@ -687,6 +688,7 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
 
     call tCurrDate%parseDate(sDateTxt)
     call tCurrDate%parseTime(sTimeTxt)
+
     call tCurrDate%calcJulianDay()
 
     if(tCurrDate < tDATETIME_1) cycle

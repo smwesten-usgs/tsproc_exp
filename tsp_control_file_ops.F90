@@ -68,7 +68,7 @@ subroutine processUserSuppliedDateTime(pBlock, tDATETIME_1, tDATETIME_2, sDateFo
   character (len=MAXARGLENGTH) :: sDATE_FORMAT, sTIME_FORMAT
 
   ! set default values
-  sDATE_1 = "01/01/0100"; sTIME_1 = "00:00:00"
+  sDATE_1 = "01/01/0000"; sTIME_1 = "00:00:00"
   sDATE_2 = "12/31/3000"; sTIME_2 = "00:00:00"
   sTIME_FORMAT = sDEFAULT_TIME_FORMAT
   pDATE_1 => null(); pTIME_1 => null()
