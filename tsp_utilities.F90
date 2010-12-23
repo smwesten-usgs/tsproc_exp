@@ -31,6 +31,12 @@ module tsp_utilities
     module procedure char2int
   end interface asInt
 
+  interface assert
+    module procedure assert_simple_sub
+    module procedure assert_module_details_sub
+    module procedure assert_block_details_sub
+  end interface assert
+
   interface uppercase
 !    module procedure uppercase_sub
     module procedure uppercase_fn
@@ -659,71 +665,140 @@ subroutine lowercase_sub ( s )
 
 end subroutine lowercase_sub
 
-!--------------------------------------------------------------------------
-!!****s* types/Assert
-! NAME
-!   Assert - General-purpose error-checking routine.
-!
-! SYNOPSIS
-!   General-purpose error-checking routine. If lCondition is .false.,
-!   prints the error message and stops!
-!
-! INPUTS
-!   lCondition - statement that evaluates to a logical .true. or .false value.
-!   sErrorMessage - accompanying error message to print if lCondition is .false.
-!   sFilename - name of the offending file; populate with the C compiler
-!                 preprocessor macro __FILE__
-!   sLineNo - line number of error; populate with preprocessor macro __LINE__
-!
-! OUTPUTS
-!   NONE
-!
-! SOURCE
 
-subroutine Assert(lCondition,sErrorMessage,sFilename,iLineNo)
+subroutine assert_simple_sub(lCondition,sErrorMessage)
 
   ! ARGUMENTS
   logical (kind=T_LOGICAL), intent(in) :: lCondition
   character (len=*), intent(in) :: sErrorMessage
-  character (len=*), optional :: sFilename
-  integer (kind=T_INT), optional :: iLineNo
   character (len=len(sErrorMessage)) :: sRecord
   character (len=256) :: sItem
 
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: i, iEnd
+  integer (kind=T_INT), dimension(2) :: iLU
+
+  iLU = [ LU_STD_OUT, LU_REC ]
+
   if ( .not. lCondition ) then
 
-    sRecord = sErrorMessage
-    write(unit=LU_STD_OUT, fmt=*)
-    write(UNIT=LU_STD_OUT,FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
-    do
-      call chomp(sRecord, sItem, "~")
-      if(len_trim(sItem) == 0) exit
-      write(UNIT=LU_STD_OUT,FMT="(a)") trim(sItem)
-    enddo
-
-    if(present(sFilename)) write(UNIT=LU_STD_OUT,FMT="(/,a)") &
-      "module: "//trim(sFilename)
-    if(present(iLineNo)) write(UNIT=LU_STD_OUT,FMT="(a)") &
-      "line number: "//trim(asChar(iLineNo))
-
     if(lLOGFILE_OPEN) then
-      write(UNIT=LU_REC,FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
+      iEnd = 2
+    else
+      iEnd = 1
+    endif
+
+    do i=1,2
+      sRecord = sErrorMessage
+      write(UNIT=iLU(i),FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
       do
         call chomp(sRecord, sItem, "~")
         if(len_trim(sItem) == 0) exit
-        write(UNIT=LU_REC,FMT="(a)") trim(sItem)
+        write(UNIT=iLU(i),FMT="(a)") trim(sItem)
       enddo
-      if(present(sFilename)) write(UNIT=LU_REC,FMT="(/,a)") &
-        "module: "//trim(sFilename)
-      if(present(iLineNo)) write(UNIT=LU_REC,FMT="(a)") &
-        "line number: "//trim(asChar(iLineNo))
-    end if
+    enddo
+
+    stop
+
+  endif
+
+end subroutine assert_simple_sub
+
+subroutine assert_module_details_sub(lCondition,sErrorMessage,sFilename,iLineNum)
+
+  ! ARGUMENTS
+  logical (kind=T_LOGICAL), intent(in) :: lCondition
+  character (len=*), intent(in) :: sErrorMessage
+  character (len=*) :: sFilename
+  integer (kind=T_INT) :: iLineNum
+  character (len=len(sErrorMessage)) :: sRecord
+  character (len=256) :: sItem
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: i, iEnd
+  integer (kind=T_INT), dimension(2) :: iLU
+
+  iLU = [ LU_STD_OUT, LU_REC ]
+
+  if ( .not. lCondition ) then
+
+    if(lLOGFILE_OPEN) then
+      iEnd = 2
+    else
+      iEnd = 1
+    endif
+
+    do i=1,2
+      sRecord = sErrorMessage
+      write(UNIT=iLU(i),FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
+      do
+        call chomp(sRecord, sItem, "~")
+        if(len_trim(sItem) == 0) exit
+        write(UNIT=iLU(i),FMT="(a)") trim(sItem)
+      enddo
+
+      write(UNIT=iLU(i),FMT="(/,'   fortran module:       ',a)") trim(sFilename)
+      write(UNIT=iLU(i),FMT="('   module line number:    ',a)") &
+        trim(asChar(iLineNum) )
+    enddo
+
+    stop
+
+  endif
+
+end subroutine assert_module_details_sub
+
+!--------------------------------------------------------------------------
+
+subroutine assert_block_details_sub(lCondition,sErrorMessage,sFilename,iLineNum, &
+   sBlockname, iBlockLineNum)
+
+  ! ARGUMENTS
+  logical (kind=T_LOGICAL), intent(in) :: lCondition
+  character (len=*), intent(in) :: sErrorMessage
+  character (len=*) :: sFilename
+  integer (kind=T_INT) :: iLineNum
+  character (len=*) :: sBlockname
+  integer (kind=T_INT) :: iBlockLineNum
+  character (len=len(sErrorMessage)) :: sRecord
+  character (len=256) :: sItem
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: i, iEnd
+  integer (kind=T_INT), dimension(2) :: iLU
+
+  iLU = [ LU_STD_OUT, LU_REC ]
+
+  if ( .not. lCondition ) then
+
+    if(lLOGFILE_OPEN) then
+      iEnd = 2
+    else
+      iEnd = 1
+    endif
+
+    do i=1,2
+      sRecord = sErrorMessage
+      write(UNIT=iLU(i),FMT="(/,a)") 'FATAL ERROR - HALTING TSPROC'
+      do
+        call chomp(sRecord, sItem, "~")
+        if(len_trim(sItem) == 0) exit
+        write(UNIT=iLU(i),FMT="(a)") trim(sItem)
+      enddo
+
+      write(UNIT=iLU(i),FMT="(/,'   block name:           ',a)") trim(sBlockname)
+      write(UNIT=iLU(i),FMT="('   ctrl file line number: ',a)")  &
+        trim(asChar(iBlockLineNum) )
+      write(UNIT=iLU(i),FMT="(/,'   fortran module:       ',a)") trim(sFilename)
+      write(UNIT=iLU(i),FMT="('   module line number:    ',a)") &
+        trim(asChar(iLineNum) )
+    enddo
 
     stop
 
   end if
 
-end subroutine Assert
+end subroutine assert_block_details_sub
 
 !--------------------------------------------------------------------------
 
@@ -840,24 +915,40 @@ end subroutine GetSysTimeDate
 
 !------------------------------------------------------------------------------
 
-function countFields(sRecord, sDelimiters)             result(iNumFields)
+function countFields(sRecord, sDelimiters_)             result(iNumFields)
 
   character (len=*), intent(in)              :: sRecord
-  character (len=*), intent(in), optional    :: sDelimiters
+  character (len=*), intent(in), optional    :: sDelimiters_
   integer (kind=T_INT) :: iNumFields
 
   ! [ LOCALS ]
   integer (kind=T_INT) :: i
+  character (len=256) :: sItem
+  character(len=len(sRecord)) :: sCopyOfRecord
 
-  iNumFields = 1
+  sCopyOfRecord = sRecord
 
-  if (present(sDelimiters)) then
-    do i=1,len_trim(sRecord)-1
-      if(scan(sRecord(i:i),sDelimiters) /= 0 ) iNumFields = iNumFields + 1
+  iNumFields = 0
+
+  if (present(sDelimiters_)) then
+    do
+!      if(scan(sRecord(i:i),sDelimiters) /= 0 ) iNumFields = iNumFields + 1
+      call chomp(sCopyOfRecord, sItem, sDelimiters_)
+      if(len_trim(sItem) > 0 ) then
+        iNumFields = iNumFields + 1
+      else
+        exit
+      endif
     enddo
   else
-    do i=1,len_trim(sRecord)-1
-      if(scan(sRecord(i:i)," ") /= 0 ) iNumFields = iNumFields + 1
+    do
+!      if(scan(sRecord(i:i)," ") /= 0 ) iNumFields = iNumFields + 1
+      call chomp(sCopyOfRecord, sItem)
+      if(len_trim(sItem) > 0 ) then
+        iNumFields = iNumFields + 1
+      else
+        exit
+      endif
     enddo
   endif
 
@@ -939,7 +1030,7 @@ subroutine Chomp_delim_sub(sRecord, sItem, sDelimiters)
   integer (kind=T_INT) :: iLen
 
   ! eliminate any leading spaces
-!  sRecord = adjustl(sRecord)
+  sRecord = adjustl(sRecord)
   ! find the end position of 'sRecord'
   iLen = len_trim(sRecord)
 

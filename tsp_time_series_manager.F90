@@ -607,10 +607,9 @@ contains
         iDelta = this%tData(i)%tDT%iJulianDay - this%tData(i-1)%tDT%iJulianDay
         if(iDelta /= 1) then
 
-          print *, i, iNumGaps, iSize, size(pDateRange)
           iNumGaps = iNumGaps + 1
           call pDateRange(iNumGaps)%newFmDT(tStartDate, this%tData(i-1)%tDT)
-          tStartDate = this%tData(i+1)%tDT
+          tStartDate = this%tData(i)%tDT
 
           write(LU_STD_OUT, fmt="(i3,') ',a,' to ',a)") iNumGaps, &
                   pDateRange(iNumGaps)%tStartDate%listdate(), &
@@ -1113,21 +1112,29 @@ contains
 
 !------------------------------------------------------------------------------
 
-  subroutine list_output_sub(this, iLU)
+  subroutine list_output_sub(this, iLU_, iOutputFormat_)
 
     class(T_TIME_SERIES) :: this
 !    character(len=*), intent(in), optional :: sDateFormat
-    integer (kind=T_INT), intent(in), optional :: iLU
+    integer (kind=T_INT), intent(in), optional :: iLU_
+    integer (kind=T_INT), intent(in), optional :: iOutputFormat_
 
     ! [ LOCALS ]
     integer (kind=T_INT) :: i
-    integer (kind=T_INT) :: LU
+    integer (kind=T_INT) :: iLU
+    integer (kind=T_INT) :: iOutputFormat
 !    character(len=20) :: sDateFmt
 
-    if(present(iLU)) then
-      LU = iLU
+    if(present(iOutputFormat_) ) then
+      iOutputFormat = iOutputFormat_
     else
-      LU = LU_STD_OUT
+      iOutputFormat = iOUTPUT_LONG_FORMAT
+    endif
+
+    if(present(iLU_)) then
+      iLU = iLU_
+    else
+      iLU = LU_STD_OUT
     endif
 
 !    if(present(sDateFormat)) then
@@ -1136,50 +1143,69 @@ contains
 !      sDateFmt = "MM/DD/YYYY"
 !    endif
 
-    write(LU,fmt="(/,' TIME_SERIES ',a,' ---->')") quote(this%sSeriesName)
+    if(iOutputFormat /= iOUTPUT_SSF_FORMAT) &
+        write(iLU,fmt="(/,' TIME_SERIES ',a,' ---->')") quote(this%sSeriesName)
 
-    if(this%iDataType == iDAILY_SERIES) then
+    select case(iOutputFormat)
 
-      do i=1,size(this%tData)
+      case(iOUTPUT_LONG_FORMAT, iOUTPUT_SSF_FORMAT)
 
-           write(LU,fmt="(1x,a18,t22,a14,t40,g16.8)") &
-             trim(this%sSeriesName), &
-             this%tData(i)%tDT%listdatetime(), this%tData(i)%rValue
+        do i=1,size(this%tData)
+          write(iLU,fmt="(a18,t22,a20,t44,g16.8)") &
+            trim(this%sSeriesName), this%tData(i)%tDT%listdatetime(), &
+              this%tData(i)%rValue
+        enddo
 
-      enddo
+      case(iOUTPUT_SHORT_FORMAT)
 
-    elseif (this%iDataType == iMONTHLY_SERIES) then
+        do i=1,size(this%tData)
+          write(iLU,fmt="(t4,g16.8)") this%tData(i)%rValue
+        enddo
 
-      do i=1,size(this%tData)
+      case(iOUTPUT_EXTENDED_FORMAT)
 
-           write(LU,fmt="(1x,a18,t22,a8,t35,g16.8)") &
-              this%sSeriesName, &
-              trim(MONTH(this%tData(i)%tDT%iMonth)%sName), this%tData(i)%rValue
+        select case(this%iDataType)
 
-      enddo
+          case(iDAILY_SERIES)
 
-    elseif (this%iDataType == iMONTHLY_SUMMARY) then
+            do i=1,size(this%tData)
+              write(iLU,fmt="(a18,t22,a20,t44,g16.8)") &
+                trim(this%sSeriesName), this%tData(i)%tDT%listdatetime(), &
+                  this%tData(i)%rValue
+            enddo
 
-      do i=1,size(this%tData)
+          case(iMONTHLY_SERIES)
 
-           write(LU,fmt="(1x,a18,t22,a8,1x,i4,t38,g16.8)") &
-              this%sSeriesName, &
-              trim(MONTH(this%tData(i)%tDT%iMonth)%sName), &
-              this%tData(i)%tDT%iYear, this%tData(i)%rValue
+            do i=1,size(this%tData)
 
-      enddo
+               write(iLU,fmt="(a18,t22,a8,t35,g16.8)") &
+                  this%sSeriesName, trim(MONTH(this%tData(i)%tDT%iMonth)%sName), &
+                    this%tData(i)%rValue
 
-    elseif (this%iDataType == iANNUAL_SUMMARY) then
+            enddo
 
-      do i=1,size(this%tData)
+          case(iMONTHLY_SUMMARY)
 
-           write(LU,fmt="(1x,a18,t25,i4,t35,g16.8)") &
-             this%sSeriesName, &
-             this%tData(i)%tDT%iYear, this%tData(i)%rValue
+            do i=1,size(this%tData)
 
-      enddo
+              write(iLU,fmt="(1x,a18,t22,a8,1x,i4,t38,g16.8)") &
+                this%sSeriesName, trim(MONTH(this%tData(i)%tDT%iMonth)%sName), &
+                  this%tData(i)%tDT%iYear, this%tData(i)%rValue
 
-    endif
+            enddo
+
+          case(iANNUAL_SUMMARY)
+
+            do i=1,size(this%tData)
+
+               write(iLU,fmt="(1x,a18,t25,i4,t35,g16.8)") &
+                 this%sSeriesName, this%tData(i)%tDT%iYear, this%tData(i)%rValue
+
+            enddo
+
+        end select  ! iDataType
+
+      end select  ! iOutputFormat
 
   end subroutine list_output_sub
 
@@ -1434,9 +1460,10 @@ contains
      pTempSeries%tData%rValue = pack(this%tData%rValue, this%tData%lSelect)
      pTempSeries%tData%tDT = pack(this%tData%tDT, this%tData%lSelect)
      pTempSeries%sDescription = trim(this%sDescription)//"; processed by HYDRO_PEAKS"
-     pTempSeries%tStartDate = this%tStartDate
-     pTempSeries%tEndDate = this%tEndDate
+!     pTempSeries%tStartDate = this%tStartDate
+!     pTempSeries%tEndDate = this%tEndDate
      pTempSeries%sSeriesName = trim(sNewSeriesName)
+     call pTempSeries%findDateMinAndMax()
 
   end function find_hydro_events_fn
 
@@ -1457,6 +1484,7 @@ contains
       integer (kind=T_INT) :: iStatistic
       integer (kind=T_INT) :: iPeriod
       integer (kind=T_INT) :: iTimeAbscissa
+      integer (kind=T_INT) :: iYearType
       character (len=256) :: sBuf
       character (len=12) :: sSuffix
       type (T_DATETIME) :: tStartDate, tEndDate
@@ -1468,7 +1496,10 @@ contains
       type (T_TIME_SERIES_DATA), pointer :: pTempData
 
       character (len=MAXARGLENGTH), dimension(:), pointer :: &
-         pNEW_SERIES_NAME, pSTATISTIC, pPERIOD, pTIME_ABSCISSA
+         pNEW_SERIES_NAME, pSTATISTIC, pPERIOD, pTIME_ABSCISSA, &
+         pYEAR_TYPE
+
+      integer (kind=T_INT), dimension(:), pointer :: pMINIMUM_VALID_DAYS
 
       pNEW_SERIES_NAME => null(); pSTATISTIC => null(); pPERIOD => null()
       pTIME_ABSCISSA => null(); pTS => null(); pTempData => null()
@@ -1494,6 +1525,10 @@ contains
       ! find out what statistics have been requested; if none, assume "mean"
       pSTATISTIC => pBlock%getString("STATISTIC")
       if(str_compare(pSTATISTIC(1), "NA")) pSTATISTIC(1) = "mean"
+
+      ! find out what type of annual statistic is desired
+      pYEAR_TYPE => pBlock%getString("YEAR_TYPE")
+      if(str_compare(pYEAR_TYPE(1), "NA")) pYEAR_TYPE(1) = "calendar"
 
       ! find out what time period been requested; if none, assume "year"
       pPERIOD => pBlock%getString("PERIOD")
@@ -1542,6 +1577,18 @@ contains
 !       endif
 
       do i=1,iSize
+
+        ! determine the YEAR TYPE
+        if(str_compare(pYEAR_TYPE(i),"calendar") ) then
+          iYearType = iCALENDAR
+        elseif(str_compare(pYEAR_TYPE(i),"water_high") ) then
+          iYearType = iWATER_YEAR_HIGH
+        elseif(str_compare(pYEAR_TYPE(i),"water_low") ) then
+          iYearType = iWATER_YEAR_LOW
+        else
+          call assert(lFALSE, "Unknown YEAR_TYPE: "//quote(pYEAR_TYPE(i)), &
+              trim(__FILE__), __LINE__, pBlock%sBlockname, pBlock%lineNumber("YEAR_TYPE"))
+        endif
 
         ! determine the time period for calculation
         if(str_compare(pPERIOD(i),"month_one") ) then
@@ -1597,7 +1644,7 @@ contains
 !        allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
 !
 
-        pTSCOL(i)%pTS => this%statByPeriod(iPeriod, iStatistic, iTimeAbscissa)
+        pTSCOL(i)%pTS => this%statByPeriod(iPeriod, iStatistic, iTimeAbscissa, iYearType)
         pTSCOL(i)%pTS%iDataType = iPeriod
 
         if( str_compare(pNEW_SERIES_NAME(1), "NA") ) then
@@ -1611,6 +1658,7 @@ contains
       if (associated(pSTATISTIC) ) deallocate(pSTATISTIC)
       if (associated(pPERIOD) ) deallocate(pPERIOD)
       if (associated(pTIME_ABSCISSA) ) deallocate(pTIME_ABSCISSA)
+      if (associated(pYEAR_TYPE) ) deallocate(pYEAR_TYPE)
 
   end function calculate_period_statistics_fn
 
@@ -1811,29 +1859,23 @@ end function ts_max_fn
 !------------------------------------------------------------------------------
 
 function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
-     iYearType_) result(pTS)
+     iYearType) result(pTS)
 
    class(T_TIME_SERIES) :: this
    integer (kind=T_INT), intent(in) :: iPeriod
    integer (kind=T_INT), intent(in) :: iStatistic
    integer (kind=T_INT), intent(in) :: iTimeAbscissa
-   integer (kind=T_INT), intent(in), optional :: iYearType_
+   integer (kind=T_INT), intent(in) :: iYearType
    type (T_TIME_SERIES), pointer :: pTS
    type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
 
    ! [ LOCALS ]
    integer (kind=T_INT) :: iFirstYear, iLastYear, iCenterYear
+   integer (kind=T_INT), dimension(1) :: iFirstDayPos, iLastDayPos
    integer (kind=T_INT) :: iMonth, iYear, n, i
    integer (kind=T_INT) :: iStat
    integer (kind=T_INT) :: iCount
    integer (kind=T_INT) :: iNumValid
-   integer (kind=T_INT) :: iYearType
-
-   if(present(iYearType_) ) then
-     iYearType = iYearType_
-   else
-     iYearType = iCALENDAR
-   endif
 
    pTS => null()
 
@@ -1865,9 +1907,11 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
    allocate(pTS, stat=iStat)
    call assert(iStat == 0, "Memory allocation error", trim(__FILE__), __LINE__)
 
-   iFirstYear = minval(this%tData%tDT%iYear, this%tData%lInclude)
-   iLastYear = maxval(this%tData%tDT%iYear, this%tData%lInclude)
-   iCenterYear = (iFirstYear + iLastYear ) / 2
+   iFirstDayPos = minloc(this%tData%tDT%iJulianDay, this%tData%lInclude)
+   iLastDayPos = maxloc(this%tData%tDT%iJulianDay, this%tData%lInclude)
+   iFirstYear = this%tData(iFirstDayPos(1))%tDT%iYear
+   iLastYear = this%tData(iLastDayPos(1))%tDT%iYear
+
 
    ! now apply the function to the appropriate time period
    select case(iPeriod)
@@ -1884,13 +1928,13 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
        select case (iTimeAbscissa)
          case(iSTART)
            tData%tDT%iDay = 1
-           tData%tDT%iYear = 2
+           tData%tDT%iYear = 1800
          case(iCENTER)
            tData%tDT%iDay = 15
-           tData%tDT%iYear = 2
+           tData%tDT%iYear = 1800
          case(iEND)
            tData%tDT%iDay = MONTH%iNumDays
-           tData%tDT%iYear = 2
+           tData%tDT%iYear = 1800
        end select
 
        do iMonth = 1,12
@@ -1951,49 +1995,89 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
 
      case(iANNUAL_SUMMARY)
 
-       allocate(tData(iLastYear - iFirstYear + 1), stat=iStat)
-       call assert(iStat == 0,"Memory allocation error", trim(__FILE__), __LINE__)
-
        ! define the year selection function to be applied
        select case (iYearType)
-
          case( iCALENDAR )
            this%select_func_ptr => select_by_year_fn
-
          case( iWATER_YEAR_HIGH )
            this%select_func_ptr => select_by_water_year_high_fn
-
+           ! iFirstYear is redefined as the first WATER YEAR HIGH
+           if (this%tData(iFirstDayPos(1))%tDT%iMonth >= 10) &
+             iFirstYear = this%tData(iFirstDayPos(1))%tDT%iYear + 1
          case( iWATER_YEAR_LOW )
            this%select_func_ptr => select_by_water_year_low_fn
+           ! iFirstYear is redefined as the first WATER YEAR LOW
+           if (this%tData(iFirstDayPos(1))%tDT%iMonth >= 4) &
+             iFirstYear = this%tData(iFirstDayPos(1))%tDT%iYear + 1
          case default
            call assert(lFALSE,"Logic error in case construct", &
              trim(__FILE__), __LINE__)
-
        end select
+
+       allocate(tData(iLastYear - iFirstYear + 1), stat=iStat)
+       call assert(iStat == 0,"Memory allocation error", trim(__FILE__), __LINE__)
 
        pTS%sDescription = "Annual "//trim(sYEAR_TYPE(iYearType))//" " &
            //trim(lowercase(sSTATISTIC(iStatistic))) &
            //" values derived from series "//quote(this%sSeriesName) &
            //"; ("//trim(asChar(iFirstYear))//" to "//trim(asChar(iLastYear))//")"
 
-       select case (iTimeAbscissa)
-         case(iSTART)
-           tData%tDT%iDay = 1
-           tData%tDT%iMonth = 1
-         case(iCENTER)
-           tData%tDT%iDay = 1
-           tData%tDT%iMonth = 6
-         case(iEND)
-           tData%tDT%iDay = 31
-           tData%tDT%iMonth = 12
-       end select
-
        n = 0
        do iYear = iFirstYear, iLastYear
 
          n = n + 1
          iCount = this%select_func_ptr(iYear)
-         tData(n)%tDT%iYear = iYear
+
+         ! took these definitions directly from John Walker's
+         ! implementation of PERIOD_STATISTICS
+         select case (iTimeAbscissa)
+           case(iSTART)
+             select case(iYearType)
+               case(iCALENDAR)
+                 tData(n)%tDT%iDay = 1
+                 tData(n)%tDT%iMonth = 1
+                 tData(n)%tDT%iYear = iYear
+               case(iWATER_YEAR_HIGH)
+                 tData(n)%tDT%iDay = 1
+                 tData(n)%tDT%iMonth = 10
+                 tData(n)%tDT%iYear = iYear - 1
+               case(iWATER_YEAR_LOW)
+                 tData(n)%tDT%iDay = 1
+                 tData(n)%tDT%iMonth = 4
+                 tData(n)%tDT%iYear = iYear - 1
+              end select
+           case(iCENTER)
+             select case(iYearType)
+               case(iCALENDAR)
+                 tData(n)%tDT%iDay = 1
+                 tData(n)%tDT%iMonth = 7
+                 tData(n)%tDT%iYear = iYear
+               case(iWATER_YEAR_HIGH)
+                 tData(n)%tDT%iDay = 1
+                 tData(n)%tDT%iMonth = 4
+                 tData(n)%tDT%iYear = iYear
+               case(iWATER_YEAR_LOW)
+                 tData(n)%tDT%iDay = 1
+                 tData(n)%tDT%iMonth = 10
+                 tData(n)%tDT%iYear = iYear
+              end select
+           case(iEND)
+             select case(iYearType)
+               case(iCALENDAR)
+                 tData(n)%tDT%iDay = 31
+                 tData(n)%tDT%iMonth = 12
+                 tData(n)%tDT%iYear = iYear
+               case(iWATER_YEAR_HIGH)
+                 tData(n)%tDT%iDay = 30
+                 tData(n)%tDT%iMonth = 9
+                 tData(n)%tDT%iYear = iYear
+               case(iWATER_YEAR_LOW)
+                 tData(n)%tDT%iDay = 31
+                 tData(n)%tDT%iMonth = 3
+                 tData(n)%tDT%iYear = iYear
+              end select
+         end select
+
          call tData(n)%tDT%calcJulianDay()
          if(iCount > 350) then
            tData(n)%rValue = this%stat_func_ptr()

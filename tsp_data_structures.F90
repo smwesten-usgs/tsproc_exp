@@ -56,6 +56,11 @@ module tsp_data_structures
                NASH_SUTCLIFFE, COEFFICIENT_OF_EFFICIENCY, INDEX_OF_AGREEMENT
   end enum
 
+  integer (kind=T_INT), parameter, public :: iOUTPUT_LONG_FORMAT = 0
+  integer (kind=T_INT), parameter, public :: iOUTPUT_SHORT_FORMAT = 1
+  integer (kind=T_INT), parameter, public :: iOUTPUT_SSF_FORMAT = 2
+  integer (kind=T_INT), parameter, public :: iOUTPUT_EXTENDED_FORMAT = 3
+
 ! global parameter for rec file, std output unit
    integer, public :: LU_REC = 12
    integer, public :: LU_DATA

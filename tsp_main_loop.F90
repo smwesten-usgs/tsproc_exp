@@ -96,27 +96,78 @@ contains
 
 !------------------------------------------------------------------------------
 
-subroutine listseriesnames(sSeriesnames)
+subroutine listnumseries(iNumSeries)
 
-  !f2py character*8192, intent(out) :: sSeriesnames
-  character(len=8192), intent(out) :: sSeriesnames
+  !f2py integer*4, intent(out) :: iNumSeries
+  integer(kind=T_INT), intent(out) :: iNumSeries
 
   ! [ LOCALS ]
-  character (len=256) :: sFormatString
-  integer (kind=T_INT) :: iCount, i
+  type (T_NODE), pointer :: pCurrent
+  integer(kind=T_INT) :: iCount
+
+  if(associated(TS%pRoot)) then
+
+    iCount = 0
+
+    pCurrent => TS%pRoot
+
+    call count_tree_nodes_sub(TS, pCurrent, iCount)
+
+  endif
+
+  nullify(pCurrent)
+
+  iNumSeries = iCount
+
+ contains
+
+   recursive subroutine count_tree_nodes_sub(TS, pCurrent, iCount)
+
+    class(TIME_SERIES_COLLECTION) :: TS
+    type (T_NODE), pointer        :: pCurrent
+    integer (kind=T_INT), intent(inout)      :: iCount
+
+    if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
+       call count_tree_nodes_sub(TS, pCurrent%pLeft, iCount)
+    end  if
+
+    iCount = iCount + 1
+
+    if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
+       call count_tree_nodes_sub(TS, pCurrent%pRight, iCount)
+    end  if
+
+  end subroutine count_tree_nodes_sub
+
+end subroutine listnumseries
+
+!------------------------------------------------------------------------------
+
+subroutine listseriesnames(iNumSeries, sSeriesnames)
+
+  !f2py integer, intent(in) :: iNumSeries
+  !f2py character*24, dimension(iNumSeries), intent(out) :: sSeriesnames
+  !ftoopy character*24, dimension(iNumSeries), intent(out), depend(iNumSeries) :: sSeriesnames
+  integer (kind=T_INT), intent(in) :: iNumSeries
+  character(len=24), dimension(iNumSeries), intent(out) :: sSeriesnames
+
+  ! [ LOCALS ]
+  !f2py intent(hide) :: iCount, tsp.   pCurrent
+  integer (kind=T_INT) :: iCount
   type (T_NODE), pointer :: pCurrent
 
   sSeriesnames = ""
 
   if(associated(TS%pRoot)) then
 
+    iCount = 0
     pCurrent => TS%pRoot
 
-    call traverse_tree_sub(TS, pCurrent, sSeriesnames)
+    call traverse_tree_sub(TS, pCurrent, sSeriesnames, iCount)
 
   else
 
-    sSeriesnames = "NA"
+    sSeriesnames(1) = "NA"
 
   endif
 
@@ -124,20 +175,22 @@ subroutine listseriesnames(sSeriesnames)
 
  contains
 
-   recursive subroutine traverse_tree_sub(TS, pCurrent, sSeriesnames)
+   recursive subroutine traverse_tree_sub(TS, pCurrent, sSeriesnames, iCount)
 
     class(TIME_SERIES_COLLECTION) :: TS
     type (T_NODE), pointer        :: pCurrent
-    character(len=8192), intent(out) :: sSeriesnames
+    character(len=24), dimension(:), intent(out) :: sSeriesnames
+    integer (kind=T_INT) :: iCount
 
     if (associated (pCurrent%pLeft) ) then           !! Take the left-hand path . . .
-       call traverse_tree_sub(TS, pCurrent%pLeft, sSeriesnames)
+       call traverse_tree_sub(TS, pCurrent%pLeft, sSeriesnames, iCount)
     end  if
 
-    sSeriesnames = trim(sSeriesNames)//" "//trim(pCurrent%sNodeName)
+    iCount = iCount + 1
+    if(iCount <= iNumSeries) sSeriesnames(iCount) = trim(pCurrent%sNodeName)
 
     if (associated (pCurrent%pRight) ) then          !! Take the right-hand path.
-       call traverse_tree_sub(TS, pCurrent%pRight, sSeriesnames)
+       call traverse_tree_sub(TS, pCurrent%pRight, sSeriesnames, iCount)
     end  if
 
   end subroutine traverse_tree_sub
@@ -2296,29 +2349,32 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
   implicit none
   !f2py character*(*), intent(in) :: sFunctionText
   !f2py character*(*), intent(in) :: sSeriesName
-
   character (len=*), intent(in) :: sFunctionText
   character (len=*), intent(in) :: sSeriesName
 
   ! [ LOCALS ]
+  !f2py intent(hide) :: sFuncTxt, sNameTxt, sBuf, sVarTxt, lInclude
+  !f2py intent(hide) :: lConsistentTimebase, sSeriesNamesTxt, iNumfields, i, j
+  !f2py intent(hide) :: sStatusFlag, sTimeSeriesList, TSCOL, pTempSeries
+  !f2py intent(hide) :: pNewSeries, rTempValue, iNumRecords, iNumSeries
+  !f2py intent(hide) :: sPreviousSeriesName, rOut, pTS, tTSCOL
   character (len=MAXEQUATIONLENGTH) :: sFuncTxt
   character (len=256) :: sNameTxt
   character (len=MAXEQUATIONLENGTH) :: sBuf
   character (len=256), dimension(:), allocatable :: sVarTxt
   logical (kind=T_LOGICAL), dimension(:), allocatable :: lInclude
   logical (kind=T_LOGICAL) :: lConsistentTimebase
-  character (len=256), dimension(:), allocatable :: sSeriesNamesTxt
-  integer (kind=T_INT) :: iNumFields, i, j
+  character (len=24), dimension(:), allocatable :: sSeriesNamesTxt
+  integer (kind=T_INT) :: i, j
   character (len=5) :: sStatusFlag
-  character (len=8192) :: sTimeSeriesList
 
   type (TIME_SERIES_COLLECTION), target :: TSCOL
   type (T_TIME_SERIES), pointer :: pTempSeries
   type (T_TIME_SERIES), pointer :: pNewSeries
   real (kind=T_SGL), dimension(:), allocatable :: rTempValue
   integer (kind=T_INT) :: iNumRecords
-  integer (kind=T_INT) :: iNumSeries
-  character (len=256) :: sPreviousSeriesName
+  integer (kind=T_INT) :: iNumSeries, iNumFields
+  character (len=24) :: sPreviousSeriesName
   real (kind=T_SGL), dimension(:), allocatable :: rOut
 
   type T_TIME_SERIES_PTR
@@ -2331,23 +2387,24 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
   sFuncTxt = ""
 
   ! first create a list of the current time series objects in memory
-  call listseriesnames(sTimeSeriesList)
-  iNumFields = countFields(trim(sTimeSeriesList))
-  allocate(sSeriesNamesTxt(iNumFields))
-  sSeriesNamesTxt = ""
-  ! parse names of current time series into seperate entries
-  do i=1,iNumFields
-    call Chomp(sTimeSeriesList, sSeriesNamesTxt(i) )
-  enddo
+!  call listseriesnames()
+  call listnumseries(iNumSeries)
+  allocate(sSeriesNamesTxt(iNumSeries))
+  call listseriesnames(iNumSeries, sSeriesNamesTxt)
 
   sFuncTxt = trim(sFunctionText)
   sBuf = sFuncTxt
   iNumFields = countFields(trim(sFuncTxt),OPERATORS//" ")
+
   allocate(sVarTxt(iNumFields), lInclude(iNumFields) )
   allocate (tTSCOL(iNumFields) )
   lInclude = lFALSE
   lConsistentTimebase = lTRUE
 
+  ! the following block of code prescreens the equation text for known
+  ! time series objects currently in memory. If a series name is found, retrieve
+  ! a pointer to the time series. If more than one series is referenced,
+  ! ensure that they have consistent timebases.
   iNumSeries = 0
   do i=1,iNumFields
     call Chomp(sBuf, sVarTxt(i) , OPERATORS//" ")
@@ -2370,6 +2427,8 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
     if(lConsistentTimebase .and. iNumSeries > 0) then
 
+      ! here we're passing the function text and the names of the known time
+      ! series that are referenced in the function text.
       call init_equation (sFuncTxt, pack(sVarTxt, lInclude), sStatusflag)
 
       if(str_compare(sStatusFlag(1:2),"ok") ) then
@@ -2389,6 +2448,9 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
 
       allocate(rTempValue(count(lInclude) ) )
 
+      ! OK. Initialization of the equation parser succeeded. Now let's evaluate
+      ! each element in the series. rTempValue is a vector of the values
+      ! of each referenced series at the current timestamp.
       do i=1,iNumRecords
         do j=1,count(lInclude)
 !          rTempValue(j) = TSCOL%pTS(j)%tData(i)%rValue
@@ -2406,14 +2468,6 @@ subroutine newseriesfromequation(sFunctionText, sSeriesname)
         "Series calculated from the equation "//quote(sFunctionText), &
 !        TSCOL%pTS(1)%tData%tDT, rOut)
         tTSCOL(1)%pTS%tData%tDT, rOut)
-
-      print *, quote(pNewSeries%sSeriesName)
-      print *, quote(pNewSeries%sDescription)
-
-      ! must nullify these pointers or else we hose the existing list of TS objects
-      ! when TS%addSeries is called
-      pNewSeries%pNext => null()
-      pNewSeries%pPrevious => null()
 
       call TS%insert(pNewSeries=pNewSeries)
 
@@ -2446,6 +2500,8 @@ end subroutine newseriesfromequation
 
 function tolower(sString)          result(sLowercase)
 
+  ! TODO: why is this even here????
+
   implicit none
   !f2py character (len=*), intent(in) :: sString
   !f2py character (len=256 ), intent(out) :: sLowercase
@@ -2460,11 +2516,16 @@ end function tolower
 
 subroutine newblock(sBlockname, sKeywords, sArgs)
 
-  character (len=*), intent(in)                                :: sBlockname
-  character (len=*)                                            :: sKeywords
-  character (len=*)                                            :: sArgs
+  !f2py character (len=*), intent(in) :: sBlockname
+  !f2py character (len=*), intent(in) :: sKeywords
+  !f2py character (len=*), intent(in) :: sArgs
+  character (len=*), intent(in)                          :: sBlockname
+  character (len=*)                                      :: sKeywords
+  character (len=*)                                      :: sArgs
 
   ! [ LOCALS ]
+  !f2py intent(hide) :: pBaseTS, pTempStatSeries, i, pSERIES_NAME, sTempSeriesname
+  !f2py intent(hide) :: pTSCOL
   character (len=MAXARGLENGTH), dimension(:), allocatable :: sKeyword
   character (len=MAXARGLENGTH), dimension(:), allocatable :: sArg1
   character (len=256) :: sBuf
@@ -2519,6 +2580,8 @@ end subroutine newblock
 subroutine period_statistics()
 
     ! [ LOCALS ]
+    !f2py intent(hide) :: pBaseTS, pTempStatSeries, i, pSERIES_NAME, sTempSeriesname
+    !f2py intent(hide) :: pTSCOL
     type (T_TIME_SERIES), pointer :: pBaseTS
     type (T_TIME_SERIES), pointer :: pTempStatSeries
     integer (kind=T_INT) :: i
@@ -2569,6 +2632,7 @@ subroutine addtoblock(sKeywords, sArgs)
   character (len=*)                                            :: sArgs
 
   ! [ LOCALS ]
+  !f2py intent(hide) :: sKeyword, sArg1, sBuf, iNumKeywords, iNumArgs, i, sStatusFlag
   character (len=MAXARGLENGTH), dimension(:), allocatable :: sKeyword
   character (len=MAXARGLENGTH), dimension(:), allocatable :: sArg1
   character (len=256) :: sBuf
@@ -2626,6 +2690,7 @@ subroutine testmonthlydates(iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEnd
   integer (kind=T_INT), intent(in) :: iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY
 
   ! [ LOCALS ]
+  !f2py intent(hide) :: tStartDate, tEndDate, i, pDR
   type (T_DATETIME) :: tStartDate, tEndDate
   integer (kind=T_INT) :: i
   type (T_DATERANGE), dimension(:), pointer :: pDR
@@ -2656,6 +2721,7 @@ subroutine testannualdates(iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndY
   integer (kind=T_INT), intent(in) :: iStartMM, iStartDD, iStartYYYY, iEndMM, iEndDD, iEndYYYY
 
   ! [ LOCALS ]
+  !f2py intent(hide) :: tStartDate, tEndDate, i, pDR
   type (T_DATETIME) :: tStartDate, tEndDate
   integer (kind=T_INT) :: i
   type (T_DATERANGE), dimension(:), pointer :: pDR

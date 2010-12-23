@@ -23,6 +23,7 @@ module tsp_control_file_ops
     procedure, public :: deallocate => deallocate_block_sub
     procedure, public :: select => select_by_keyword_fn
     procedure, public :: index => find_by_keyword_fn
+    procedure, public :: lineNumber => get_line_number_fn
     procedure, public :: getString => get_character_values_by_keyword_fn
     procedure, public :: findString => get_character_values_by_partial_keyword_fn
     procedure, public :: getReal => get_real_values_by_keyword_fn
@@ -320,14 +321,20 @@ subroutine print_dictionary_sub(this)
   ! [ LOCALS ]
   integer (kind=T_INT) :: i, n
 
+  n = 0
+
   write(LU_STD_OUT, fmt="(/,a,/)") "  ** CONTENTS of block "//quote(this%sBlockName)
 
-  n = size(this%sKeyword)
+  if(allocated(this%sKeyword) )  n = size(this%sKeyword)
 
-  do i=1,n
-    write(LU_STD_OUT,fmt="(i3,t6,a,1x,a,1x,a)") this%iLineNum(i), &
+  if(n > 0) then
+
+    do i=1,n
+      write(LU_STD_OUT,fmt="(i3,t6,a,1x,a,1x,a)") this%iLineNum(i), &
              trim(this%sKeyword(i)),trim(this%sArg1(i)),trim(this%sArg2(i))
-  enddo
+    enddo
+
+  endif
 
 end subroutine print_dictionary_sub
 
@@ -471,6 +478,27 @@ end function select_by_keyword_fn
 
 !------------------------------------------------------------------------------
 
+function get_line_number_fn(this, sKeyword)    result(iLineNumber)
+
+  class ( T_BLOCK ) :: this
+  character (len=*) :: sKeyword
+  integer (kind=T_INT) :: iLineNumber
+
+  ! [ LOCALS ]
+  integer (kind=T_INT) :: iIndex
+
+  iIndex = this%index(sKeyword)
+
+  if(iIndex > 0 .and. iIndex <= size(this%iLineNum) ) then
+    iLineNumber = this%iLineNum(this%index(sKeyword) )
+  else
+    iLineNumber = -99999
+  endif
+
+end function get_line_number_fn
+
+!------------------------------------------------------------------------------
+
 function find_by_keyword_fn(this, sKeyword)    result(iIndex)
 
   class ( T_BLOCK ) :: this
@@ -492,9 +520,9 @@ function find_by_keyword_fn(this, sKeyword)    result(iIndex)
     endif
   enddo
 
-  call Assert(iCount /= 0, "Keyword "//trim(sKeyword)//" was not found in block " &
-     //trim(this%sBlockname)//" starting at line "//trim(asChar(this%iStartingLineNumber)), &
-     trim(__FILE__), __LINE__)
+!  call Assert(iCount /= 0, "Keyword "//trim(sKeyword)//" was not found in block " &
+!     //trim(this%sBlockname)//" starting at line "//trim(asChar(this%iStartingLineNumber)), &
+!     trim(__FILE__), __LINE__)
 
   call Assert(iCount <= 1, "Too many keywords ("//trim(sKeyword)//") found in block " &
      //trim(this%sBlockname)//" starting at line "//trim(asChar(this%iStartingLineNumber)), &

@@ -174,15 +174,15 @@ subroutine delete_top_down_sub(this, sNodename)
        if( get_node_color(pQ_NotLink) == RED ) then            ! other child is RED
          select case (iLast)
            case(LEFT)
-   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
+!   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
              pP%pLeft => node_single_rotation_fn(pQ, iDir)
              pP => pP%pLeft
-   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
+!   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
            case(RIGHT)
-   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
+!   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
              pP%pRight => node_single_rotation_fn(pQ, iDir)
              pP => pP%pRight
-   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
+!   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
          end select
 
        else if ( get_node_color(pQ_NotLink) == BLACK ) then     ! other child is BLACK
@@ -204,7 +204,7 @@ subroutine delete_top_down_sub(this, sNodename)
              call set_node_color(pQ, RED)         ! set current to RED
 
            elseif(associated(pG) ) then
-                         call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
+!        call dump(pQ, pG, pF, pP, pS, this%pRoot, iDir, iLast, __LINE__)
 
              iDir2 = get_direction(associated(pG%pRight, pP) )
 
@@ -286,7 +286,7 @@ subroutine delete_top_down_sub(this, sNodename)
 
    if (associated(pHead) ) deallocate(pHead)
 
-   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
+!   call this%makeDot(pQ, pG, pF, pP, pS, this%pRoot, __LINE__)
 
 end subroutine delete_top_down_sub
 
@@ -678,7 +678,7 @@ contains
 
     iNullCount = iNullCount + 1
     write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
-    write(LU_DOT, fmt="(a)") '    '//trim(pNode%sNodename)//' -> null' &
+    write(LU_DOT, fmt="(a)") '    '//quote(pNode%sNodename)//' -> null' &
        //trim(asChar(iNullCount) )//';'
 
   end subroutine null_pointer
@@ -689,8 +689,8 @@ contains
     character (len=*) :: sLabel
 
      if(associated(pNode) ) then
-       write(LU_DOT, fmt="(a)") '    '//trim(sLabel)//' -> ' &
-          //trim(pNode%sNodename)//';'
+       write(LU_DOT, fmt="(a)") '    '//quote(sLabel)//' -> ' &
+          //quote(pNode%sNodename)//';'
      else
        call null_pointer(pNode)
      endif
@@ -704,13 +704,13 @@ contains
 
     ! define the node shape and color
     if(pNode%iColor == RED) then
-      write(LU_DOT, fmt="(a)") '    '//trim(pNode%sNodename) &
+      write(LU_DOT, fmt="(a)") '    '//quote(pNode%sNodename) &
         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=red1, fontcolor=white ];'
     elseif(pNode%iColor == BLACK) then
-      write(LU_DOT, fmt="(a)") '    '//trim(pNode%sNodename) &
+      write(LU_DOT, fmt="(a)") '    '//quote(pNode%sNodename) &
         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=black, fontcolor=white ];'
     else
-      write(LU_DOT, fmt="(a)") '    '//trim(pNode%sNodename) &
+      write(LU_DOT, fmt="(a)") '    '//quote(pNode%sNodename) &
         //' [fontname=sans,fontsize=12,shape=box,style=filled,color=cyan, fontcolor=white ];'
     endif
 
@@ -733,7 +733,7 @@ contains
 
     ! define the node shape and color
     ! note: see http://joe.milbourn.org.uk/notes/Graphviz:__Add_edges_without_changing_node_rank/
-    write(LU_DOT, fmt="(a)") '    '//trim(sLabel) &
+    write(LU_DOT, fmt="(a)") '    '//quote(sLabel) &
       //' [fontname=sans,fontsize=12,shape=egg,style=filled,color=' &
       //trim(sColor)//', fontcolor='//trim(sTextColor)//', constraint=false ];'
 
@@ -813,22 +813,22 @@ end subroutine add_pointers
 
 
      if(associated(pCurrent%pLeft) ) then
-       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> ' &
-          //trim(pCurrent%pLeft%sNodename)//';'
+       write(LU_DOT, fmt="(a)") '    '//quote(pCurrent%sNodename)//' -> ' &
+          //quote(pCurrent%pLeft%sNodename)//';'
      else
        iNullCount = iNullCount + 1
        write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
-       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> null' &
+       write(LU_DOT, fmt="(a)") '    '//quote(pCurrent%sNodename)//' -> null' &
           //trim(asChar(iNullCount) )//';'
      endif
 
      if(associated(pCurrent%pRight) ) then
-       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> ' &
-          //trim(pCurrent%pRight%sNodename)//';'
+       write(LU_DOT, fmt="(a)") '    '//quote(pCurrent%sNodename)//' -> ' &
+          //quote(pCurrent%pRight%sNodename)//';'
      else
        iNullCount = iNullCount + 1
        write(LU_DOT, fmt="(a)") '    null'//trim(asChar(iNullCount) )//' [shape=point, color=black];'
-       write(LU_DOT, fmt="(a)") '    '//trim(pCurrent%sNodename)//' -> null' &
+       write(LU_DOT, fmt="(a)") '    '//quote(pCurrent%sNodename)//' -> null' &
           //trim(asChar(iNullCount) )//';'
      endif
 
@@ -1197,28 +1197,35 @@ end function find_node_in_tree_fn
 
     ! [ LOCALS ]
     character (len=256) :: sDescription
+    character (len=MAXNAMELENGTH) :: sSeriesname
 
     if(associated(pNode) ) then
       if(associated(pNode%pTS) ) then
         sDescription = pNode%pTS%sDescription
+        sSeriesname = pNode%pTS%sSeriesname
         deallocate(pNode%pTS)
         this%iNumTimeSeries = this%iNumTimeSeries - 1
         call echolog("")
-        call echolog("Deleted: "//trim(sDescription)//"." )
-        call echolog("  [There are now "//trim(asChar(this%iNumTimeSeries) ) &
-          //" time series in memory.]")
-        call echolog("")
+        call echolog("Deleted: "//quote(sSeriesname) )
+        if(lVERBOSE) then
+          call echolog("  [ "//trim(sDescription)//". ]" )
+          call echolog("  [ There are now "//trim(asChar(this%iNumTimeSeries) ) &
+            //" time series in memory. ]")
+        endif
       endif
 
       if(associated(pNode%pTable) ) then
         sDescription = pNode%pTable%sDescription
+        sSeriesname = pNode%pTable%sSeriesname
         deallocate(pNode%pTable)
         this%iNumTables = this%iNumTables - 1
         call echolog("")
-        call echolog("Deleted: "//trim(sDescription)//"." )
-        call echolog("  [There are now "//trim(asChar(this%iNumTables) ) &
-          //" tables in memory.]")
-        call echolog("")
+        call echolog("Deleted: "//quote(sSeriesname) )
+        if(lVERBOSE) then
+          call echolog("  [ "//trim(sDescription)//". ]" )
+          call echolog("  [ There are now "//trim(asChar(this%iNumTables) ) &
+            //" tables in memory. ]")
+        endif
       endif
 
     endif
@@ -1766,11 +1773,12 @@ TREE_CLIMBINQ_LOOQ:                 &
         pNewNode%pTS => pNewSeries
         pNewNode%sNodeName = trim(adjustl(pNewSeries%sSeriesName) )
         this%iNumTimeSeries = this%iNumTimeSeries + 1
+        call echolog("  Added: "//quote(pNewSeries%sSeriesname) )
         if(lVERBOSE) then
-          call echolog("  Added: "//trim(pNewSeries%sDescription)//".")
-          call echolog("    [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
+          call echolog("  [ "//trim(pNewSeries%sDescription)//". ]")
+          call echolog("  [ date range: "//pNewSeries%tStartDate%listdate()//" to " &
              //pNewSeries%tEndDate%listdate()//" ]")
-          call echolog("    [There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory.]")
+          call echolog("  [ There are now "//trim(asChar(this%iNumTimeSeries))//" time series in memory. ]")
           call echolog("")
         endif
       endif
@@ -1781,11 +1789,12 @@ TREE_CLIMBINQ_LOOQ:                 &
         pNewNode%pTable => pNewTable
         pNewNode%sNodeName = trim(adjustl(pNewTable%sSeriesName) )
         this%iNumTables = this%iNumTables + 1
+        call echolog("  Added: "//quote(pNewTable%sSeriesname) )
         if(lVERBOSE) then
-          call echolog("  Added: "//trim(pNewTable%sDescription)//".")
-          call echolog("    [ date range: "//pNewTable%tStartDate%listdate()//" to " &
+          call echolog("  [ "//trim(pNewTable%sDescription)//". ]")
+          call echolog("  [ date range: "//pNewTable%tStartDate%listdate()//" to " &
              //pNewTable%tEndDate%listdate()//" ]")
-          call echolog("    [There are now "//trim(asChar(this%iNumTables))//" tables in memory.]")
+          call echolog("  [ There are now "//trim(asChar(this%iNumTables))//" tables in memory. ]")
           call echolog("")
         endif
       endif
