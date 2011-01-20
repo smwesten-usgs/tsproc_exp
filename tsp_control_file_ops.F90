@@ -314,6 +314,10 @@ end function read_block_fn
 
 !------------------------------------------------------------------------------
 
+!> @brief
+!> This subroutine writes the contents of the current TSPROC
+!> block to the screen. Only useful when running TSPROC as a
+!> Python module.
 subroutine print_dictionary_sub(this)
 
   class ( T_BLOCK ) :: this

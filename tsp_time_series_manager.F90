@@ -1485,6 +1485,7 @@ contains
       integer (kind=T_INT) :: iPeriod
       integer (kind=T_INT) :: iTimeAbscissa
       integer (kind=T_INT) :: iYearType
+      real (kind=T_SGL) :: rFractionValid
       character (len=256) :: sBuf
       character (len=12) :: sSuffix
       type (T_DATETIME) :: tStartDate, tEndDate
@@ -1499,7 +1500,7 @@ contains
          pNEW_SERIES_NAME, pSTATISTIC, pPERIOD, pTIME_ABSCISSA, &
          pYEAR_TYPE
 
-      integer (kind=T_INT), dimension(:), pointer :: pMINIMUM_VALID_DAYS
+      real (kind=T_SGL), dimension(:), pointer :: pFRACTION_VALID
 
       pNEW_SERIES_NAME => null(); pSTATISTIC => null(); pPERIOD => null()
       pTIME_ABSCISSA => null(); pTS => null(); pTempData => null()
@@ -1529,6 +1530,17 @@ contains
       ! find out what type of annual statistic is desired
       pYEAR_TYPE => pBlock%getString("YEAR_TYPE")
       if(str_compare(pYEAR_TYPE(1), "NA")) pYEAR_TYPE(1) = "calendar"
+
+      ! FRACTION_VALID allows user to exclude periods that contain
+      ! extended gaps in the period of record; default is to
+      ! calculate the statistic regardless of the number of valid
+      ! data points contained in the period under consideration
+      pFRACTION_VALID => pBlock%getReal("FRACTION_VALID")
+      if(pFRACTION_VALID(1) > rNEAR_TINY) then
+        rFractionValid = pFRACTION_VALID(1)
+      else
+        rFractionValid = 0.
+      endif
 
       ! find out what time period been requested; if none, assume "year"
       pPERIOD => pBlock%getString("PERIOD")
@@ -1644,7 +1656,8 @@ contains
 !        allocate(pTempSeries(i)%tData(iStatSize), stat = iStat )
 !
 
-        pTSCOL(i)%pTS => this%statByPeriod(iPeriod, iStatistic, iTimeAbscissa, iYearType)
+        pTSCOL(i)%pTS => this%statByPeriod(iPeriod, iStatistic, &
+            iTimeAbscissa, iYearType, rFractionValid)
         pTSCOL(i)%pTS%iDataType = iPeriod
 
         if( str_compare(pNEW_SERIES_NAME(1), "NA") ) then
@@ -1659,6 +1672,7 @@ contains
       if (associated(pPERIOD) ) deallocate(pPERIOD)
       if (associated(pTIME_ABSCISSA) ) deallocate(pTIME_ABSCISSA)
       if (associated(pYEAR_TYPE) ) deallocate(pYEAR_TYPE)
+      if(associated(pFRACTION_VALID) ) deallocate(pFRACTION_VALID)
 
   end function calculate_period_statistics_fn
 
@@ -1859,23 +1873,25 @@ end function ts_max_fn
 !------------------------------------------------------------------------------
 
 function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
-     iYearType) result(pTS)
+     iYearType, rFractionValid)   result(pTS)
 
    class(T_TIME_SERIES) :: this
    integer (kind=T_INT), intent(in) :: iPeriod
    integer (kind=T_INT), intent(in) :: iStatistic
    integer (kind=T_INT), intent(in) :: iTimeAbscissa
    integer (kind=T_INT), intent(in) :: iYearType
-   type (T_TIME_SERIES), pointer :: pTS
-   type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
+   real (kind=T_SGL), intent(in)    :: rFractionValid
+   type (T_TIME_SERIES), pointer    :: pTS
 
    ! [ LOCALS ]
+   type (T_TIME_SERIES_DATA), dimension(:), allocatable :: tData
    integer (kind=T_INT) :: iFirstYear, iLastYear, iCenterYear
    integer (kind=T_INT), dimension(1) :: iFirstDayPos, iLastDayPos
    integer (kind=T_INT) :: iMonth, iYear, n, i
    integer (kind=T_INT) :: iStat
    integer (kind=T_INT) :: iCount
    integer (kind=T_INT) :: iNumValid
+   integer (kind=T_INT) :: iRequiredValid
 
    pTS => null()
 
@@ -1939,11 +1955,12 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
 
        do iMonth = 1,12
 
+         iRequiredValid = rFractionValid * MONTH(iMonth)%iNumDays
          iCount = this%selectByMonth(iMonth)
 
          call tData(iMonth)%tDT%calcJulianDay()
 
-         if(iCount > 25) then
+         if(iCount > iRequiredValid) then
            tData(iMonth)%rValue = this%stat_func_ptr()
          else
            tData(iMonth)%rValue = -HUGE(rZERO)
@@ -1973,7 +1990,7 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
        do iYear = iFirstYear, iLastYear
 
          do iMonth = 1,12
-
+           iRequiredValid = rFractionValid * MONTH(iMonth)%iNumDays
            n = n + 1
            iCount = this%selectByMonthAndYear(iMonth, iYear)
 
@@ -1982,7 +1999,7 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
            if(iTimeAbscissa == iEND) tData(n)%tDT%iDay = MONTH(iMonth)%iNumDays
            call tData(n)%tDT%calcJulianDay()
 
-           if(iCount > 25) then
+           if(iCount > iRequiredValid) then
              tData(n)%rValue = this%stat_func_ptr()
            else
              tData(n)%rValue = -HUGE(rZERO)
@@ -2022,6 +2039,7 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
            //" values derived from series "//quote(this%sSeriesName) &
            //"; ("//trim(asChar(iFirstYear))//" to "//trim(asChar(iLastYear))//")"
 
+       iRequiredValid = int(rFractionValid * 365.25, kind=T_INT)
        n = 0
        do iYear = iFirstYear, iLastYear
 
@@ -2079,7 +2097,7 @@ function ts_calc_stat_by_period_fn(this, iPeriod, iStatistic, iTimeAbscissa, &
          end select
 
          call tData(n)%tDT%calcJulianDay()
-         if(iCount > 350) then
+         if(iCount > iRequiredValid) then
            tData(n)%rValue = this%stat_func_ptr()
          else
            tData(n)%rValue = -HUGE(rZERO)

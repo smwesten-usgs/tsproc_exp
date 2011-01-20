@@ -694,6 +694,8 @@ subroutine get_mul_series_ssf_fast(pBlock, TS)
     if(tCurrDate < tDATETIME_1) cycle
     if(tCurrDate > tDATETIME_2) cycle
 
+    call tCurrDate%calcWaterYear()
+
     call Chomp(sRecord,sItem, DELIMITERS)  ! discharge and data flag
 
     if(len_trim(sItem)>0) then
@@ -1061,6 +1063,8 @@ subroutine get_series_wdm(pBlock, TS)
     call tDate(i)%calcJulianDay(iMM(i), iDD(i), iYY(i), &
         iHour(i), iMin(i), iSec(i))
 !    print *, trim(tDate(i)%listdatetime() )//": "//trim(asChar(rValue(i)))
+
+    call tDate(i)%calcWaterYear()
 
     if(tDate(i) < tDATETIME_1) lSelect(i) = lFALSE
     if(tDate(i) > tDATETIME_2) lSelect(i) = lFALSE
