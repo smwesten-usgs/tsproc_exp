@@ -5,7 +5,8 @@ set CFLAGS="-O2 -Wall -Wstrict-prototypes"
    -LD:\SMWData\Source_Code\tsproc\branches\experimental ^
    -LD:\SMWData\Source_Code\libanne4.0\lib ^
    --fcompiler=gnu95 ^
-   --compiler=mingw32 -c pytsproc.pyf -ltsproc -lwdm -ladwdm -lutil
+   --compiler=mingw32 -c pytsproc.pyf -ltsproc -lwdm -ladwdm -lutil ^
+   -Ic:\gfortran_32\include
 
 ::f2py tsp_main_loop.F90 -h pytsproc.pyf -m pytsproc
 

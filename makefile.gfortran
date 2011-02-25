@@ -71,10 +71,10 @@ tsp_command_processors.o: tsp_command_processors.F90  tsp_data_structures.o tsp_
 wsc_additions.o: wsc_additions.F90  tsp_data_structures.o tsp_utilities.o tsp_time_series_processors.o
 		$(F95) $(FFLAGS) -c wsc_additions.F90 -o wsc_additions.o
 clean :
-		rm -f *.o
-		rm -f tsproc.exe
-		rm -f tsproc
-		rm -f *.mod
+		del /Q *.o
+		del /Q tsproc.exe
+		del /Q tsproc
+		del /Q *.mod
 
 copy:
 		sudo chmod 755 tsproc
