@@ -10,43 +10,117 @@ This version of TSPROC is INCOMPLETE. It was begun as a complete re-write of the
 <table>
   <tr>
     <th>TSPROC Block Name</th><th>tsproc</th><th>tsproc_exp</th>  
-    <th>DIGITAL_FILTER</th><th>*/th><th>*</th>
-    <th>Butterworth Filter</th><th>*/th><th>*</th>
-    <th>Baseflow Separation Filter</th><th>*/th><th>*</th>
-    <th>Clipping</th><th>*/th><th>*</th>
-    <th>Settling Time</th><th>*/th><th>*</th>
-    <th>Reverse Filtering</th><th>*/th><th>*</th>
-    <th>ERASE_ENTITY</th><th>*/th><th>*</th>
-    <th>EXCEEDENCE_TIME</th><th>*/th><th>*</th>
-    <th>GET_MUL_SERIES_GENERAL</th><th>/th><th></th>
-    <th>GET_MUL_SERIES_GSFLOW_GAGE</th><th>*/th><th></th>
-    <th>GET_MUL_SERIES_NWIS</th><th>/th><th>*</th>
-    <th>GET_MUL_SERIES_SSF</th><th>*/th><th>*</th>
-    <th>GET_MUL_SERIES_STATVAR</th><th>*/th><th>*</th>
-    <th>GET_SERIES_PLOTGEN</th><th>*/th><th></th>
-    <th>GET_SERIES_SSF</th><th>*/th><th>*</th>
-    <th>GET_SERIES_TETRAD</th><th>*/th><th></th>
-    <th>GET_SERIES_UFORE_HYDRO</th><th>*/th><th></th>
-    <th>GET_SERIES_WDM</th><th>*/th><th>*</th>
-    <th>HYDRO_EVENTS</th><th>*/th><th>*</th>
-    <th>HYDROLOGIC_INDICES</th><th>*/th><th>*</th>
-    <th>LIST_OUTPUT</th><th>*/th><th>*</th>
-    <th>NEW_SERIES_UNIFORM</th><th>*/th><th></th>
-    <th>NEW_TIME_BASE</th><th>*/th><th>*</th>
-    <th>PERIOD_STATISTICS</th><th>*/th><th>*</th>
-    <th>REDUCE_TIME_SPAN</th><th>*/th><th>*</th>
-    <th>SERIES_BASE_LEVEL</th><th>*/th><th></th>
-    <th>SERIES_CLEAN</th><th>*/th><th></th>
-    <th>SERIES_COMPARE</th><th>*/th><th>*</th>
-    <th>SERIES_DIFFERENCE</th><th>*/th><th>*</th>
-    <th>SERIES_DISPLACE</th><th>*/th><th></th>
-    <th>SERIES_EQUATION</th><th>*/th><th>*</th>
-    <th>SERIES_STATISTICS</th><th>*/th><th>*</th>
-    <th>SETTINGS</th><th>*/th><th>*</th>
-    <th>USGS_HYSEP</th><th>*/th><th>*</th>
-    <th>V_TABLE_TO_SERIES</th><th>*/th><th></th>
-    <th>VOLUME_CALCULATION</th><th>*/th><th>*</th>
-    <th>WRITE_PEST_FILES</th><th>*/th><th>*</th>
+  </tr>
+  <tr>
+    <th>DIGITAL_FILTER</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>Butterworth Filter</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>Baseflow Separation Filter</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>Clipping</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>Settling Time</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>Reverse Filtering</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>ERASE_ENTITY</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>EXCEEDENCE_TIME</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>GET_MUL_SERIES_GENERAL</th><th></th><th></th>
+  </tr>
+  <tr>
+    <th>GET_MUL_SERIES_GSFLOW_GAGE</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>GET_MUL_SERIES_NWIS</th><th></th><th>*</th>
+  </tr>
+  <tr>
+    <th>GET_MUL_SERIES_SSF</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>GET_MUL_SERIES_STATVAR</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>GET_SERIES_PLOTGEN</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>GET_SERIES_SSF</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>GET_SERIES_TETRAD</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>GET_SERIES_UFORE_HYDRO</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>GET_SERIES_WDM</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>HYDRO_EVENTS</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>HYDROLOGIC_INDICES</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>LIST_OUTPUT</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>NEW_SERIES_UNIFORM</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>NEW_TIME_BASE</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>PERIOD_STATISTICS</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>REDUCE_TIME_SPAN</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>SERIES_BASE_LEVEL</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>SERIES_CLEAN</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>SERIES_COMPARE</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>SERIES_DIFFERENCE</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>SERIES_DISPLACE</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>SERIES_EQUATION</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>SERIES_STATISTICS</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>SETTINGS</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>USGS_HYSEP</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>V_TABLE_TO_SERIES</th><th>*</th><th></th>
+  </tr>
+  <tr>
+    <th>VOLUME_CALCULATION</th><th>*</th><th>*</th>
+  </tr>
+  <tr>
+    <th>WRITE_PEST_FILES</th><th>*</th><th>*</th>
   </tr>
 </table>
 
