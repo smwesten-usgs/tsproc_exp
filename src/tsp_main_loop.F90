@@ -2257,7 +2257,6 @@ subroutine finalize()
   call echolog("")
   call echolog("TSPROC run ended at: "//trim(tEndDate%listdatetime() ) , "(a)")
   call echolog("TSPROC run completed in "//trim(adjustl(sElapsedSeconds))//" seconds.", "(a)")
-  call echolog("")
 
   call INFILE%close()
 !  call TS%clear()
